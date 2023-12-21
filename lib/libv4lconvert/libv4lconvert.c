@@ -16,11 +16,6 @@
 # Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335  USA
  */
 
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -138,7 +133,7 @@ static const struct v4lconvert_pixfmt supported_src_pixfmts[] = {
 	{ V4L2_PIX_FMT_KONICA420,	12,	 6,	 3,	1 },
 	{ V4L2_PIX_FMT_SN9C20X_I420,	12,	 6,	 3,	1 },
 	{ V4L2_PIX_FMT_M420,		12,	 6,	 3,	1 },
-	{ V4L2_PIX_FMT_HM12,		12,	 6,	 3,	1 },
+	{ V4L2_PIX_FMT_NV12_16L16,	12,	 6,	 3,	1 },
 	{ V4L2_PIX_FMT_NV12,		12,	 6,	 3,	1 },
 	{ V4L2_PIX_FMT_CPIA1,		 0,	 6,	 3,	1 },
 	/* JPEG and variants */
@@ -905,30 +900,30 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
 			v4lconvert_yuv420_to_rgb24(data->convert_pixfmt_buf, dest, width,
-					height, yvu);
+					height, bytesperline, yvu);
 			break;
 		case V4L2_PIX_FMT_BGR24:
 			v4lconvert_yuv420_to_bgr24(data->convert_pixfmt_buf, dest, width,
-					height, yvu);
+					height, bytesperline, yvu);
 			break;
 		}
 		break;
 	}
 
 		/* Conexant cx2341x raw video macroblock format */
-	case V4L2_PIX_FMT_HM12:
+	case V4L2_PIX_FMT_NV12_16L16:
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
-			v4lconvert_hm12_to_rgb24(src, dest, width, height);
+			v4lconvert_nv12_16l16_to_rgb24(src, dest, width, height);
 			break;
 		case V4L2_PIX_FMT_BGR24:
-			v4lconvert_hm12_to_bgr24(src, dest, width, height);
+			v4lconvert_nv12_16l16_to_bgr24(src, dest, width, height);
 			break;
 		case V4L2_PIX_FMT_YUV420:
-			v4lconvert_hm12_to_yuv420(src, dest, width, height, 0);
+			v4lconvert_nv12_16l16_to_yuv420(src, dest, width, height, 0);
 			break;
 		case V4L2_PIX_FMT_YVU420:
-			v4lconvert_hm12_to_yuv420(src, dest, width, height, 1);
+			v4lconvert_nv12_16l16_to_yuv420(src, dest, width, height, 1);
 			break;
 		}
 		break;
@@ -937,16 +932,16 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 	case V4L2_PIX_FMT_NV12:
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
-			v4lconvert_nv12_to_rgb24(src, dest, width, height, 0);
+			v4lconvert_nv12_to_rgb24(src, dest, width, height, bytesperline, 0);
 			break;
 		case V4L2_PIX_FMT_BGR24:
-			v4lconvert_nv12_to_rgb24(src, dest, width, height, 1);
+			v4lconvert_nv12_to_rgb24(src, dest, width, height, bytesperline, 1);
 			break;
 		case V4L2_PIX_FMT_YUV420:
-			v4lconvert_nv12_to_yuv420(src, dest, width, height, 0);
+			v4lconvert_nv12_to_yuv420(src, dest, width, height, bytesperline, 0);
 			break;
 		case V4L2_PIX_FMT_YVU420:
-			v4lconvert_nv12_to_yuv420(src, dest, width, height, 1);
+			v4lconvert_nv12_to_yuv420(src, dest, width, height, bytesperline, 1);
 			break;
 		}
 		break;
@@ -1245,7 +1240,7 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
 	        case V4L2_PIX_FMT_BGR24:
-			v4lconvert_grey_to_rgb24(src, dest, width, height);
+			v4lconvert_grey_to_rgb24(src, dest, width, height, bytesperline);
 			break;
 		case V4L2_PIX_FMT_YUV420:
 		case V4L2_PIX_FMT_YVU420:
@@ -1282,10 +1277,10 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		}
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
-			v4lconvert_rgb565_to_rgb24(src, dest, width, height);
+			v4lconvert_rgb565_to_rgb24(src, dest, width, height, bytesperline);
 			break;
 		case V4L2_PIX_FMT_BGR24:
-			v4lconvert_rgb565_to_bgr24(src, dest, width, height);
+			v4lconvert_rgb565_to_bgr24(src, dest, width, height, bytesperline);
 			break;
 		case V4L2_PIX_FMT_YUV420:
 			v4lconvert_rgb565_to_yuv420(src, dest, fmt, 0);
@@ -1398,11 +1393,11 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
 			v4lconvert_yuv420_to_rgb24(src, dest, width,
-					height, 0);
+					height, bytesperline, 0);
 			break;
 		case V4L2_PIX_FMT_BGR24:
 			v4lconvert_yuv420_to_bgr24(src, dest, width,
-					height, 0);
+					height, bytesperline, 0);
 			break;
 		case V4L2_PIX_FMT_YUV420:
 			memcpy(dest, src, width * height * 3 / 2);
@@ -1422,11 +1417,11 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		switch (dest_pix_fmt) {
 		case V4L2_PIX_FMT_RGB24:
 			v4lconvert_yuv420_to_rgb24(src, dest, width,
-					height, 1);
+					height, bytesperline, 1);
 			break;
 		case V4L2_PIX_FMT_BGR24:
 			v4lconvert_yuv420_to_bgr24(src, dest, width,
-					height, 1);
+					height, bytesperline, 1);
 			break;
 		case V4L2_PIX_FMT_YUV420:
 			v4lconvert_swap_uv(src, dest, fmt);
@@ -1445,10 +1440,10 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 		if (!tmpbuf)
 			return v4lconvert_oom_error(data);
 
-		v4lconvert_nv16_to_yuyv(src, tmpbuf, width, height);
+		v4lconvert_nv16_to_yuyv(src, tmpbuf, width, height, bytesperline);
 		src_pix_fmt = V4L2_PIX_FMT_YUYV;
 		src = tmpbuf;
-		bytesperline = bytesperline * 2;
+		bytesperline = width * 2;
 		/* fall through */
 	}
 	case V4L2_PIX_FMT_YUYV:
@@ -1482,10 +1477,10 @@ static int v4lconvert_convert_pixfmt(struct v4lconvert_data *data,
 			return v4lconvert_oom_error(data);
 
 		/* Note NV61 is NV16 with U and V swapped so this becomes yvyu. */
-		v4lconvert_nv16_to_yuyv(src, tmpbuf, width, height);
+		v4lconvert_nv16_to_yuyv(src, tmpbuf, width, height, bytesperline);
 		src_pix_fmt = V4L2_PIX_FMT_YVYU;
 		src = tmpbuf;
-		bytesperline = bytesperline * 2;
+		bytesperline = width * 2;
 		/* fall through */
 	}
 	case V4L2_PIX_FMT_YVYU:

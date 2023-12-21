@@ -25,7 +25,9 @@
 #include <unistd.h>
 
 #include <linux/videodev2.h>
+#include <v4l2-info.h>
 #include <libv4l2rds.h>
+#include <v4l-getsubopt.h>
 
 using dev_vec = std::vector<std::string>;
 using dev_map = std::map<std::string, std::string>;
@@ -185,104 +187,6 @@ static int doioctl_name(int fd, unsigned long int request, void *parm, const cha
 
 #define doioctl(n, r, p) doioctl_name(n, r, p, #r)
 
-static const char *audmode2s(int audmode)
-{
-	switch (audmode) {
-		case V4L2_TUNER_MODE_STEREO: return "stereo";
-		case V4L2_TUNER_MODE_LANG1: return "lang1";
-		case V4L2_TUNER_MODE_LANG2: return "lang2";
-		case V4L2_TUNER_MODE_LANG1_LANG2: return "bilingual";
-		case V4L2_TUNER_MODE_MONO: return "mono";
-		default: return "unknown";
-	}
-}
-
-static std::string rxsubchans2s(int rxsubchans)
-{
-	std::string s;
-
-	if (rxsubchans & V4L2_TUNER_SUB_MONO)
-		s += "mono ";
-	if (rxsubchans & V4L2_TUNER_SUB_STEREO)
-		s += "stereo ";
-	if (rxsubchans & V4L2_TUNER_SUB_LANG1)
-		s += "lang1 ";
-	if (rxsubchans & V4L2_TUNER_SUB_LANG2)
-		s += "lang2 ";
-	if (rxsubchans & V4L2_TUNER_SUB_RDS)
-		s += "rds ";
-	return s;
-}
-
-static std::string tcap2s(unsigned cap)
-{
-	std::string s;
-
-	if (cap & V4L2_TUNER_CAP_LOW)
-		s += "62.5 Hz ";
-	else
-		s += "62.5 kHz ";
-	if (cap & V4L2_TUNER_CAP_NORM)
-		s += "multi-standard ";
-	if (cap & V4L2_TUNER_CAP_HWSEEK_BOUNDED)
-		s += "hwseek-bounded ";
-	if (cap & V4L2_TUNER_CAP_HWSEEK_WRAP)
-		s += "hwseek-wrap ";
-	if (cap & V4L2_TUNER_CAP_STEREO)
-		s += "stereo ";
-	if (cap & V4L2_TUNER_CAP_LANG1)
-		s += "lang1 ";
-	if (cap & V4L2_TUNER_CAP_LANG2)
-		s += "lang2 ";
-	if (cap & V4L2_TUNER_CAP_RDS)
-		s += "rds ";
-	if (cap & V4L2_TUNER_CAP_RDS_BLOCK_IO)
-		s += "rds-block-I/O ";
-	if (cap & V4L2_TUNER_CAP_RDS_CONTROLS)
-		s += "rds-controls ";
-	if (cap & V4L2_TUNER_CAP_FREQ_BANDS)
-		s += "freq-bands ";
-	if (cap & V4L2_TUNER_CAP_HWSEEK_PROG_LIM)
-		s += "hwseek-prog-lim ";
-	return s;
-}
-
-static std::string cap2s(unsigned cap)
-{
-	std::string s;
-
-	if (cap & V4L2_CAP_RDS_CAPTURE)
-		s += "\t\tRDS Capture\n";
-	if (cap & V4L2_CAP_RDS_OUTPUT)
-		s += "\t\tRDS Output\n";
-	if (cap & V4L2_CAP_TUNER)
-		s += "\t\tTuner\n";
-	if (cap & V4L2_CAP_MODULATOR)
-		s += "\t\tModulator\n";
-	if (cap & V4L2_CAP_RADIO)
-		s += "\t\tRadio\n";
-	if (cap & V4L2_CAP_READWRITE)
-		s += "\t\tRead/Write\n";
-	if (cap & V4L2_CAP_STREAMING)
-		s += "\t\tStreaming\n";
-	if (cap & V4L2_CAP_DEVICE_CAPS)
-		s += "\t\tDevice Capabilities\n";
-	return s;
-}
-
-static std::string modulation2s(unsigned modulation)
-{
-	switch (modulation) {
-	case V4L2_BAND_MODULATION_VSB:
-		return "VSB";
-	case V4L2_BAND_MODULATION_FM:
-		return "FM";
-	case V4L2_BAND_MODULATION_AM:
-		return "AM";
-	}
-	return "Unknown";
-}
-
 static bool is_radio_dev(const char *name)
 {
 	return !memcmp(name, "radio", 5);
@@ -362,7 +266,7 @@ static dev_vec list_devices()
 
 static int parse_subopt(char **subs, const char * const *subopts, char **value)
 {
-	int opt = getsubopt(subs, const_cast<char * const *>(subopts), value);
+	int opt = v4l_getsubopt(subs, const_cast<char * const *>(subopts), value);
 
 	if (opt == -1) {
 		fprintf(stderr, "Invalid suboptions specified\n");
@@ -824,25 +728,6 @@ static int parse_cl(int argc, char **argv)
 	return 0;
 }
 
-static void print_driver_info(const struct v4l2_capability *vcap)
-{
-
-	printf("Driver Info:\n");
-	printf("\tDriver name   : %s\n", vcap->driver);
-	printf("\tCard type     : %s\n", vcap->card);
-	printf("\tBus info      : %s\n", vcap->bus_info);
-	printf("\tDriver version: %d.%d.%d\n",
-			vcap->version >> 16,
-			(vcap->version >> 8) & 0xff,
-			vcap->version & 0xff);
-	printf("\tCapabilities  : 0x%08X\n", vcap->capabilities);
-	printf("%s", cap2s(vcap->capabilities).c_str());
-	if (vcap->capabilities & V4L2_CAP_DEVICE_CAPS) {
-		printf("\tDevice Caps   : 0x%08X\n", vcap->device_caps);
-		printf("%s", cap2s(vcap->device_caps).c_str());
-	}
-}
-
 static void set_options(const int fd, const int capabilities, struct v4l2_frequency *vf,
 			struct v4l2_tuner *tuner)
 {
@@ -906,7 +791,7 @@ static void get_options(const int fd, const int capabilities, struct v4l2_freque
 					 vt.rangelow / 16.0, vt.rangehigh / 16.0);
 			printf("\tSignal strength/AFC  : %ld%%/%d\n",
 				lround(vt.signal / 655.25), vt.afc);
-			printf("\tCurrent audio mode   : %s\n", audmode2s(vt.audmode));
+			printf("\tCurrent audio mode   : %s\n", audmode2s(vt.audmode).c_str());
 			printf("\tAvailable subchannels: %s\n",
 					rxsubchans2s(vt.rxsubchans).c_str());
 		}
@@ -998,7 +883,7 @@ int main(int argc, char **argv)
 
 	/* Info options */
 	if (params.options[OptGetDriverInfo])
-		print_driver_info(&vcap);
+		v4l2_info_capability(vcap);
 	/* Set options */
 	set_options(fd, vcap.capabilities, &vf, &tuner);
 	/* Get options */

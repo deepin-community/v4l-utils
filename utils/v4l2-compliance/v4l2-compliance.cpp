@@ -32,6 +32,7 @@
 
 #include "v4l2-compliance.h"
 #include <media-info.h>
+#include <v4l-getsubopt.h>
 
 /* Short option list
 
@@ -84,8 +85,10 @@ bool show_colors;
 bool exit_on_fail;
 bool exit_on_warn;
 bool is_vivid;
+bool is_uvcvideo;
 int media_fd = -1;
 unsigned warnings;
+bool has_mmu = true;
 
 static unsigned color_component;
 static unsigned color_skip;
@@ -150,8 +153,21 @@ static struct option long_options[] = {
 
 static void print_sha()
 {
+	int fd = open("/dev/null", O_RDONLY);
+
+	if (fd >= 0) {
+		// FIONBIO is a write-only ioctl that takes an int argument that
+		// enables (!= 0) or disables (== 0) nonblocking mode of a fd.
+		//
+		// Passing a nullptr should return EFAULT on MMU capable machines,
+		// and it works if there is no MMU.
+		has_mmu = ioctl(fd, FIONBIO, nullptr);
+		close(fd);
+	}
 	printf("v4l2-compliance %s%s, ", PACKAGE_VERSION, STRING(GIT_COMMIT_CNT));
-	printf("%zd bits, %zd-bit time_t\n", sizeof(void *) * 8, sizeof(time_t) * 8);
+	printf("%zd bits, %zd-bit time_t%s\n",
+	       sizeof(void *) * 8, sizeof(time_t) * 8,
+	       has_mmu ? "" : ", has no MMU");
 	if (strlen(STRING(GIT_SHA)))
 		printf("v4l2-compliance SHA: %s %s\n",
 		       STRING(GIT_SHA), STRING(GIT_COMMIT_DATE));
@@ -537,6 +553,10 @@ static void determine_codec_mask(struct node &node)
 				mask |= STATELESS_ENCODER;
 				break;
 #endif
+			case V4L2_PIX_FMT_QC08C:
+			case V4L2_PIX_FMT_QC10C:
+				num_compressed_cap_fmts--;
+				break;
 			default:
 				return;
 			}
@@ -574,9 +594,16 @@ static void determine_codec_mask(struct node &node)
 				break;
 			case V4L2_PIX_FMT_MPEG2_SLICE:
 			case V4L2_PIX_FMT_H264_SLICE:
+			case V4L2_PIX_FMT_HEVC_SLICE:
 			case V4L2_PIX_FMT_VP8_FRAME:
+			case V4L2_PIX_FMT_VP9_FRAME:
+			case V4L2_PIX_FMT_AV1_FRAME:
 			case V4L2_PIX_FMT_FWHT_STATELESS:
 				mask |= STATELESS_DECODER;
+				break;
+			case V4L2_PIX_FMT_QC08C:
+			case V4L2_PIX_FMT_QC10C:
+				num_compressed_out_fmts--;
 				break;
 			default:
 				return;
@@ -620,9 +647,9 @@ static int testCap(struct node *node)
 		V4L2_CAP_VIDEO_M2M;
 
 	memset(&vcap, 0xff, sizeof(vcap));
-	// Must always be there
-	fail_on_test(doioctl(node, VIDIOC_QUERYCAP, nullptr) != EFAULT);
 	fail_on_test(doioctl(node, VIDIOC_QUERYCAP, &vcap));
+	if (has_mmu)
+		fail_on_test(doioctl(node, VIDIOC_QUERYCAP, nullptr) != EFAULT);
 	fail_on_test(check_ustring(vcap.driver, sizeof(vcap.driver)));
 	fail_on_test(check_ustring(vcap.card, sizeof(vcap.card)));
 	fail_on_test(check_ustring(vcap.bus_info, sizeof(vcap.bus_info)));
@@ -635,7 +662,8 @@ static int testCap(struct node *node)
 	    memcmp(vcap.bus_info, "parport", 7) &&
 	    memcmp(vcap.bus_info, "platform:", 9) &&
 	    memcmp(vcap.bus_info, "rmi4:", 5) &&
-	    memcmp(vcap.bus_info, "libcamera:", 10))
+	    memcmp(vcap.bus_info, "libcamera:", 10) &&
+	    memcmp(vcap.bus_info, "gadget.", 7))
 		return fail("missing bus_info prefix ('%s')\n", vcap.bus_info);
 	if (!node->media_bus_info.empty() &&
 	    node->media_bus_info != std::string(reinterpret_cast<const char *>(vcap.bus_info)))
@@ -649,7 +677,6 @@ static int testCap(struct node *node)
 	dcaps = vcap.device_caps;
 	node->is_m2m = dcaps & m2m_caps;
 	fail_on_test(caps == 0);
-	fail_on_test(caps & V4L2_CAP_ASYNCIO);
 	fail_on_test(!(caps & V4L2_CAP_DEVICE_CAPS));
 	fail_on_test(dcaps & V4L2_CAP_DEVICE_CAPS);
 	fail_on_test(dcaps & ~caps);
@@ -818,7 +845,7 @@ static void streamingSetup(struct node *node)
 
 static int parse_subopt(char **subs, const char * const *subopts, char **value)
 {
-	int opt = getsubopt(subs, const_cast<char * const *>(subopts), value);
+	int opt = v4l_getsubopt(subs, const_cast<char * const *>(subopts), value);
 
 	if (opt == -1) {
 		fprintf(stderr, "Invalid suboptions specified\n");
@@ -941,7 +968,7 @@ err:
 }
 
 void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_node, media_type type,
-	      unsigned frame_count, unsigned all_fmt_frame_count)
+	      unsigned frame_count, unsigned all_fmt_frame_count, int parent_media_fd)
 {
 	struct node node2;
 	struct v4l2_capability vcap = {};
@@ -959,6 +986,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 	if (node.is_v4l2()) {
 		doioctl(&node, VIDIOC_QUERYCAP, &vcap);
 		driver = reinterpret_cast<const char *>(vcap.driver);
+		is_uvcvideo = driver == "uvcvideo";
 		is_vivid = driver == "vivid";
 		if (is_vivid)
 			node.bus_info = reinterpret_cast<const char *>(vcap.bus_info);
@@ -969,8 +997,12 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		memset(&vcap, 0, sizeof(vcap));
 	}
 
-	if (!node.is_media())
-		media_fd = mi_get_media_fd(node.g_fd(), node.bus_info);
+	if (!node.is_media()) {
+		if (parent_media_fd >= 0)
+			media_fd = parent_media_fd;
+		else
+			media_fd = mi_get_media_fd(node.g_fd(), node.bus_info);
+	}
 
 	int fd = node.is_media() ? node.g_fd() : media_fd;
 	if (fd >= 0) {
@@ -980,15 +1012,15 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 			if (!node.is_v4l2())
 				driver = mdinfo.driver;
 			node.media_bus_info = mdinfo.bus_info;
+			node.has_media = true;
 		}
 	}
 
 	if (driver.empty())
-		printf("Compliance test for device %s%s:\n\n",
-		       node.device, node.g_direct() ? "" : " (using libv4l2)");
+		printf("Compliance test for device ");
 	else
-		printf("Compliance test for %s device %s%s:\n\n",
-		       driver.c_str(), node.device, node.g_direct() ? "" : " (using libv4l2)");
+		printf("Compliance test for %s device ", driver.c_str());
+	printf("%s%s:\n\n", node.device, node.g_direct() ? "" : " (using libv4l2)");
 
 	if (node.g_caps() & (V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VBI_CAPTURE |
 			 V4L2_CAP_VIDEO_CAPTURE_MPLANE | V4L2_CAP_SLICED_VBI_CAPTURE |
@@ -1206,6 +1238,10 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 	if (node.is_subdev()) {
 		bool has_source = false;
 		bool has_sink = false;
+		struct v4l2_subdev_routing sd_routing[2] = {};
+		struct v4l2_subdev_route sd_routes[2][NUM_ROUTES_MAX] = {};
+		bool has_routes = !!(subdevcap.capabilities & V4L2_SUBDEV_CAP_STREAMS);
+		int ret;
 
 		node.frame_interval_pad = -1;
 		node.enum_frame_interval_pad = -1;
@@ -1217,6 +1253,34 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		}
 		node.is_passthrough_subdev = has_source && has_sink;
 
+		if (has_routes) {
+			printf("Sub-Device routing ioctls:\n");
+
+			for (unsigned which = V4L2_SUBDEV_FORMAT_TRY;
+				which <= V4L2_SUBDEV_FORMAT_ACTIVE; which++) {
+
+				printf("\ttest %s VIDIOC_SUBDEV_G_ROUTING/VIDIOC_SUBDEV_S_ROUTING: %s\n",
+				       which ? "Active" : "Try",
+				       ok(testSubDevRouting(&node, which)));
+			}
+
+			printf("\n");
+
+			for (unsigned which = V4L2_SUBDEV_FORMAT_TRY;
+				which <= V4L2_SUBDEV_FORMAT_ACTIVE; which++) {
+
+				sd_routing[which].which = which;
+				sd_routing[which].routes = (__u64)sd_routes[which];
+				sd_routing[which].num_routes = NUM_ROUTES_MAX;
+
+				ret = doioctl(&node, VIDIOC_SUBDEV_G_ROUTING, &sd_routing[which]);
+				if (ret) {
+					fail("VIDIOC_SUBDEV_G_ROUTING: failed to get routing\n");
+					sd_routing[which].num_routes = 0;
+				}
+			}
+		}
+
 		for (unsigned pad = 0; pad < node.entity.pads; pad++) {
 			printf("Sub-Device ioctls (%s Pad %u):\n",
 			       (node.pads[pad].flags & MEDIA_PAD_FL_SINK) ?
@@ -1226,32 +1290,82 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 			node.has_subdev_enum_fival = 0;
 			for (unsigned which = V4L2_SUBDEV_FORMAT_TRY;
 			     which <= V4L2_SUBDEV_FORMAT_ACTIVE; which++) {
-				printf("\ttest %s VIDIOC_SUBDEV_ENUM_MBUS_CODE/FRAME_SIZE/FRAME_INTERVAL: %s\n",
-				       which ? "Active" : "Try",
-				       ok(testSubDevEnum(&node, which, pad)));
-				printf("\ttest %s VIDIOC_SUBDEV_G/S_FMT: %s\n",
-				       which ? "Active" : "Try",
-				       ok(testSubDevFormat(&node, which, pad)));
-				printf("\ttest %s VIDIOC_SUBDEV_G/S_SELECTION/CROP: %s\n",
-				       which ? "Active" : "Try",
-				       ok(testSubDevSelection(&node, which, pad)));
-				if (which)
-					printf("\ttest VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: %s\n",
-					       ok(testSubDevFrameInterval(&node, pad)));
+				struct v4l2_subdev_routing dummy_routing;
+				struct v4l2_subdev_route dummy_routes[1];
+
+				const struct v4l2_subdev_routing *routing;
+				const struct v4l2_subdev_route *routes;
+
+				if (has_routes) {
+					routing = &sd_routing[which];
+					routes = sd_routes[which];
+				} else {
+					dummy_routing.num_routes = 1;
+					dummy_routing.routes = (__u64)&dummy_routes;
+					dummy_routes[0].source_pad = pad;
+					dummy_routes[0].source_stream = 0;
+					dummy_routes[0].sink_pad = pad;
+					dummy_routes[0].sink_stream = 0;
+					dummy_routes[0].flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+
+					routing = &dummy_routing;
+					routes = dummy_routes;
+				}
+
+				for (unsigned i = 0; i < routing->num_routes; ++i) {
+					const struct v4l2_subdev_route *r = &routes[i];
+					unsigned stream;
+
+					if (!(r->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+						continue;
+
+					if ((node.pads[pad].flags & MEDIA_PAD_FL_SINK) &&
+					    (r->sink_pad == pad))
+						stream = r->sink_stream;
+					else if ((node.pads[pad].flags & MEDIA_PAD_FL_SOURCE) &&
+					    (r->source_pad == pad))
+						stream = r->source_stream;
+					else
+						continue;
+
+					printf("\t%s Stream %u\n",which ? "Active" : "Try",
+					       stream);
+
+					printf("\ttest %s VIDIOC_SUBDEV_ENUM_MBUS_CODE/FRAME_SIZE/FRAME_INTERVAL: %s\n",
+					       which ? "Active" : "Try",
+					       ok(testSubDevEnum(&node, which, pad, stream)));
+					printf("\ttest %s VIDIOC_SUBDEV_G/S_FMT: %s\n",
+					       which ? "Active" : "Try",
+					       ok(testSubDevFormat(&node, which, pad, stream)));
+					printf("\ttest %s VIDIOC_SUBDEV_G/S_SELECTION/CROP: %s\n",
+					       which ? "Active" : "Try",
+					       ok(testSubDevSelection(&node, which, pad, stream)));
+					if (which)
+						printf("\ttest VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: %s\n",
+						       ok(testSubDevFrameInterval(&node, pad, stream)));
+				}
 			}
-			if (node.has_subdev_enum_code && node.has_subdev_enum_code < 3)
-				fail("VIDIOC_SUBDEV_ENUM_MBUS_CODE: try/active mismatch\n");
-			if (node.has_subdev_enum_fsize && node.has_subdev_enum_fsize < 3)
-				fail("VIDIOC_SUBDEV_ENUM_FRAME_SIZE: try/active mismatch\n");
-			if (node.has_subdev_enum_fival && node.has_subdev_enum_fival < 3)
-				fail("VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL: try/active mismatch\n");
-			if (node.has_subdev_fmt && node.has_subdev_fmt < 3)
-				fail("VIDIOC_SUBDEV_G/S_FMT: try/active mismatch\n");
-			if (node.has_subdev_selection && node.has_subdev_selection < 3)
-				fail("VIDIOC_SUBDEV_G/S_SELECTION: try/active mismatch\n");
-			if (node.has_subdev_selection &&
-			    node.has_subdev_selection != node.has_subdev_fmt)
-				fail("VIDIOC_SUBDEV_G/S_SELECTION: fmt/selection mismatch\n");
+
+			/*
+			 * These tests do not make sense for subdevs with multiplexed streams,
+			 * as the try & active cases may have different routing and thus different
+			 * behavior.
+			 */
+			if (!has_routes) {
+				if (node.has_subdev_enum_code && node.has_subdev_enum_code < 3)
+					fail("VIDIOC_SUBDEV_ENUM_MBUS_CODE: try/active mismatch\n");
+				if (node.has_subdev_enum_fsize && node.has_subdev_enum_fsize < 3)
+					fail("VIDIOC_SUBDEV_ENUM_FRAME_SIZE: try/active mismatch\n");
+				if (node.has_subdev_enum_fival && node.has_subdev_enum_fival < 3)
+					fail("VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL: try/active mismatch\n");
+				if (node.has_subdev_fmt && node.has_subdev_fmt < 3)
+					fail("VIDIOC_SUBDEV_G/S_FMT: try/active mismatch\n");
+				if (node.has_subdev_selection && node.has_subdev_selection < 3)
+					fail("VIDIOC_SUBDEV_G/S_SELECTION: try/active mismatch\n");
+				if (node.has_subdev_selection &&
+				    node.has_subdev_selection != node.has_subdev_fmt)
+					fail("VIDIOC_SUBDEV_G/S_SELECTION: fmt/selection mismatch\n");
+			}
 			printf("\n");
 		}
 	}
@@ -1339,6 +1453,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 
 		printf("Buffer ioctls%s:\n", suffix);
 		printf("\ttest VIDIOC_REQBUFS/CREATE_BUFS/QUERYBUF: %s\n", ok(testReqBufs(&node)));
+		printf("\ttest CREATE_BUFS maximum buffers: %s\n", ok(testCreateBufsMax(&node)));
 		// Reopen after each streaming test to reset the streaming state
 		// in case of any errors in the preceeding test.
 		node.reopen();

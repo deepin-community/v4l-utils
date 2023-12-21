@@ -19,11 +19,6 @@
 #ifndef __LIBV4LCONVERT_PRIV_H
 #define __LIBV4LCONVERT_PRIV_H
 
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -118,10 +113,10 @@ void v4lconvert_rgb24_to_yuv420(const unsigned char *src, unsigned char *dest,
 		const struct v4l2_format *src_fmt, int bgr, int yvu, int bpp);
 
 void v4lconvert_yuv420_to_rgb24(const unsigned char *src, unsigned char *dst,
-		int width, int height, int yvu);
+		int width, int height, int stride, int yvu);
 
 void v4lconvert_yuv420_to_bgr24(const unsigned char *src, unsigned char *dst,
-		int width, int height, int yvu);
+		int width, int height, int stride, int yvu);
 
 void v4lconvert_yuyv_to_rgb24(const unsigned char *src, unsigned char *dst,
 		int width, int height, int stride);
@@ -133,7 +128,7 @@ void v4lconvert_yuyv_to_yuv420(const unsigned char *src, unsigned char *dst,
 		int width, int height, int stride, int yvu);
 
 void v4lconvert_nv16_to_yuyv(const unsigned char *src, unsigned char *dest,
-		int width, int height);
+		int width, int height, int stride);
 
 void v4lconvert_yvyu_to_rgb24(const unsigned char *src, unsigned char *dst,
 		int width, int height, int stride);
@@ -157,7 +152,7 @@ void v4lconvert_swap_uv(const unsigned char *src, unsigned char *dst,
 		const struct v4l2_format *src_fmt);
 
 void v4lconvert_grey_to_rgb24(const unsigned char *src, unsigned char *dest,
-		int width, int height);
+		int width, int height, int stride);
 
 void v4lconvert_grey_to_yuv420(const unsigned char *src, unsigned char *dest,
 		const struct v4l2_format *src_fmt);
@@ -178,10 +173,10 @@ int v4lconvert_y10b_to_yuv420(struct v4lconvert_data *data,
 	const unsigned char *src, unsigned char *dest, int width, int height);
 
 void v4lconvert_rgb565_to_rgb24(const unsigned char *src, unsigned char *dest,
-		int width, int height);
+		int width, int height, int stride);
 
 void v4lconvert_rgb565_to_bgr24(const unsigned char *src, unsigned char *dest,
-		int width, int height);
+		int width, int height, int stride);
 
 void v4lconvert_rgb565_to_yuv420(const unsigned char *src, unsigned char *dest,
 		const struct v4l2_format *src_fmt, int yvu);
@@ -274,23 +269,23 @@ void v4lconvert_bayer10p_to_bayer8(unsigned char *bayer10p,
 void v4lconvert_bayer16_to_bayer8(unsigned char *bayer16,
 		unsigned char *bayer8, int width, int height);
 
-void v4lconvert_hm12_to_rgb24(const unsigned char *src,
+void v4lconvert_nv12_16l16_to_rgb24(const unsigned char *src,
 		unsigned char *dst, int width, int height);
 
-void v4lconvert_hm12_to_bgr24(const unsigned char *src,
+void v4lconvert_nv12_16l16_to_bgr24(const unsigned char *src,
 		unsigned char *dst, int width, int height);
 
-void v4lconvert_hm12_to_yuv420(const unsigned char *src,
+void v4lconvert_nv12_16l16_to_yuv420(const unsigned char *src,
 		unsigned char *dst, int width, int height, int yvu);
 
 void v4lconvert_hsv_to_rgb24(const unsigned char *src, unsigned char *dest,
 		int width, int height, int bgr, int Xin, unsigned char hsv_enc);
 
 void v4lconvert_nv12_to_rgb24(const unsigned char *src, unsigned char *dest,
-		int width, int height, int bgr);
+		int width, int height, int stride, int bgr);
 
 void v4lconvert_nv12_to_yuv420(const unsigned char *src, unsigned char *dest,
-		int width, int height, int yvu);
+		int width, int height, int stride, int yvu);
 
 void v4lconvert_rotate90(unsigned char *src, unsigned char *dest,
 		struct v4l2_format *fmt);

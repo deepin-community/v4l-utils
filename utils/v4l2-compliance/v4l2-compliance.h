@@ -24,16 +24,11 @@
 #include <map>
 #include <set>
 #include <string>
+#include <cstdint>
 
 #include <linux/videodev2.h>
 #include <linux/v4l2-subdev.h>
 #include <linux/media.h>
-
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
 
 #ifndef NO_LIBV4L2
 #include <libv4l2.h>
@@ -54,9 +49,11 @@ extern bool no_progress;
 extern bool exit_on_fail;
 extern bool exit_on_warn;
 extern bool is_vivid; // We're testing the vivid driver
+extern bool is_uvcvideo; // We're testing the uvc driver
 extern int kernel_version;
 extern int media_fd;
 extern unsigned warnings;
+extern bool has_mmu;
 
 enum poll_mode {
 	POLL_MODE_NONE,
@@ -85,7 +82,14 @@ enum poll_mode {
 #define VIVID_CID_REQ_VALIDATE_ERROR	(VIVID_CID_VIVID_BASE + 72)
 
 #define VIVID_CID_CUSTOM_BASE		(V4L2_CID_USER_BASE | 0xf000)
+#define VIVID_CID_INTEGER64		(VIVID_CID_CUSTOM_BASE + 3)
+#define VIVID_CID_STRING		(VIVID_CID_CUSTOM_BASE + 5)
+#define VIVID_CID_AREA			(VIVID_CID_CUSTOM_BASE + 11)
 #define VIVID_CID_RO_INTEGER		(VIVID_CID_CUSTOM_BASE + 12)
+#define VIVID_CID_U32_DYN_ARRAY		(VIVID_CID_CUSTOM_BASE + 13)
+#define VIVID_CID_U8_PIXEL_ARRAY	(VIVID_CID_CUSTOM_BASE + 14)
+
+#define PIXEL_ARRAY_DIV 16
 
 struct test_query_ext_ctrl: v4l2_query_ext_ctrl {
 	__u64 menu_mask;
@@ -118,6 +122,7 @@ struct base_node {
 	struct node *node2;	/* second open filehandle */
 	bool has_outputs;
 	bool has_inputs;
+	bool has_media;
 	unsigned tuners;
 	unsigned modulators;
 	unsigned inputs;
@@ -206,6 +211,10 @@ private:
 	std::set<int> fhs;
 };
 
+#ifndef __FILE_NAME__
+#define __FILE_NAME__ __FILE__
+#endif
+
 #define COLOR_GREEN(s) "\033[32m" s "\033[0m"
 #define COLOR_RED(s) "\033[1;31m" s "\033[0m"
 #define COLOR_BOLD(s) "\033[1m" s "\033[0m"
@@ -223,7 +232,7 @@ private:
 			printf("\t\t%s: %s(%d): " fmt,		\
 			       show_colors ?			\
 			       COLOR_BOLD("warn") : "warn",	\
-			       __FILE__, __LINE__, ##args);	\
+			       __FILE_NAME__, __LINE__, ##args);	\
 		if (exit_on_warn)				\
 			std::exit(EXIT_FAILURE);		\
 	} while (0)
@@ -261,7 +270,7 @@ private:
 #define fail(fmt, args...) 						\
 ({ 									\
 	printf("\t\t%s: %s(%d): " fmt, show_colors ?			\
-	       COLOR_RED("fail") : "fail", __FILE__, __LINE__, ##args);	\
+	       COLOR_RED("fail") : "fail", __FILE_NAME__, __LINE__, ##args);	\
 	if (exit_on_fail)						\
 		std::exit(EXIT_FAILURE);				\
 	1;								\
@@ -299,7 +308,7 @@ int check_ustring(const __u8 *s, int len);
 int check_0(const void *p, int len);
 int restoreFormat(struct node *node);
 void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_node, media_type type,
-	      unsigned frame_count, unsigned all_fmt_frame_count);
+	      unsigned frame_count, unsigned all_fmt_frame_count, int parent_media_fd = -1);
 std::string stream_from(const std::string &pixelformat, bool &use_hdr);
 
 // Media Controller ioctl tests
@@ -363,16 +372,18 @@ int testDecoder(struct node *node);
 
 // SubDev ioctl tests
 int testSubDevCap(struct node *node);
-int testSubDevEnum(struct node *node, unsigned which, unsigned pad);
-int testSubDevFormat(struct node *node, unsigned which, unsigned pad);
-int testSubDevSelection(struct node *node, unsigned which, unsigned pad);
-int testSubDevFrameInterval(struct node *node, unsigned pad);
+int testSubDevEnum(struct node *node, unsigned which, unsigned pad, unsigned stream);
+int testSubDevFormat(struct node *node, unsigned which, unsigned pad, unsigned stream);
+int testSubDevSelection(struct node *node, unsigned which, unsigned pad, unsigned stream);
+int testSubDevFrameInterval(struct node *node, unsigned pad, unsigned stream);
+int testSubDevRouting(struct node *node, unsigned which);
 
 // Buffer ioctl tests
 int testReqBufs(struct node *node);
 int testReadWrite(struct node *node);
 int testExpBuf(struct node *node);
 int testBlockingWait(struct node *node);
+int testCreateBufsMax(struct node *node);
 
 // 32-bit architecture, 32/64-bit time_t tests
 int testTime32_64(struct node *node);

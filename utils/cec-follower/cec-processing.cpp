@@ -332,7 +332,8 @@ static void processMsg(struct node *node, struct cec_msg &msg, unsigned me, __u8
 		/* Standby */
 
 	case CEC_MSG_STANDBY:
-		enter_standby(node);
+		if (!node->ignore_standby || (++node->standby_cnt % node->ignore_standby))
+			enter_standby(node);
 		return;
 
 
@@ -366,7 +367,8 @@ static void processMsg(struct node *node, struct cec_msg &msg, unsigned me, __u8
 	case CEC_MSG_TEXT_VIEW_ON:
 		if (!cec_has_tv(1 << me))
 			break;
-		exit_standby(node);
+		if (!node->ignore_view_on || (++node->view_on_cnt % node->ignore_view_on))
+			exit_standby(node);
 		return;
 	case CEC_MSG_SET_STREAM_PATH: {
 		__u16 phys_addr;
@@ -1076,13 +1078,14 @@ static void update_programmed_timers(struct node *node)
 	}
 }
 
-void testProcessing(struct node *node, bool wallclock)
+void testProcessing(struct node *node, bool exclusive, bool wallclock)
 {
 	struct cec_log_addrs laddrs;
 	fd_set rd_fds;
 	fd_set ex_fds;
 	int fd = node->fd;
-	__u32 mode = CEC_MODE_INITIATOR | CEC_MODE_FOLLOWER;
+	__u32 mode = CEC_MODE_INITIATOR |
+		(exclusive ? CEC_MODE_EXCL_FOLLOWER : CEC_MODE_FOLLOWER);
 	unsigned me;
 	unsigned last_poll_la = 15;
 	__u8 last_pwr_state = current_power_state(node);

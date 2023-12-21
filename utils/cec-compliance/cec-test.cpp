@@ -96,12 +96,8 @@ int system_info_version(struct node *node, unsigned me, unsigned la, bool intera
 
 	cec_msg_init(&msg, me, la);
 	cec_msg_get_cec_version(&msg, true);
-	if (!transmit_timeout(node, &msg) || timed_out(&msg))
+	if (!transmit_timeout(node, &msg) || timed_out_or_abort(&msg))
 		return fail_or_warn(node, "Get CEC Version timed out\n");
-	if (unrecognized_op(&msg))
-		return OK_NOT_SUPPORTED;
-	if (refused(&msg))
-		return OK_REFUSED;
 
 	/* This needs to be kept in sync with newer CEC versions */
 	fail_on_test(msg.msg[2] < CEC_OP_CEC_VERSION_1_3A ||
@@ -264,6 +260,7 @@ int core_abort(struct node *node, unsigned me, unsigned la, bool interactive)
 }
 
 static const vec_remote_subtests core_subtests{
+	{ "Wake up", CEC_LOG_ADDR_MASK_ALL, standby_resume_wakeup, true },
 	{ "Feature aborts unknown messages", CEC_LOG_ADDR_MASK_ALL, core_unknown },
 	{ "Feature aborts Abort message", CEC_LOG_ADDR_MASK_ALL, core_abort },
 };
@@ -1160,13 +1157,16 @@ void testRemote(struct node *node, unsigned me, unsigned la, unsigned test_tags,
 
 	if (!util_interactive_ensure_power_state(node, me, la, interactive, CEC_OP_POWER_STATUS_ON))
 		return;
-	if (node->remote[la].in_standby && !interactive) {
-		announce("The remote device is in standby. It should be powered on when testing. Aborting.");
-		return;
-	}
 	if (!node->remote[la].has_power_status) {
 		announce("The device didn't support Give Device Power Status.");
 		announce("Assuming that the device is powered on.");
+	}
+	if (la != CEC_LOG_ADDR_UNREGISTERED &&
+	    node->remote[la].phys_addr == CEC_PHYS_ADDR_INVALID) {
+		announce("The device has an invalid physical address, this");
+		announce("makes it impossible to run the compliance test.");
+		ok(FAIL_CRITICAL);
+		return;
 	}
 
 	/* Ensure that the remote device knows the initiator's primary device type.*/

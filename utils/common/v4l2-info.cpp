@@ -16,12 +16,7 @@ static std::string num2s(unsigned num, bool is_hex = true)
 	return buf;
 }
 
-struct flag_def {
-	unsigned flag;
-	const char *str;
-};
-
-static std::string flags2s(unsigned val, const flag_def *def)
+std::string flags2s(unsigned val, const flag_def *def)
 {
 	std::string s;
 
@@ -92,10 +87,10 @@ static std::string cap2s(unsigned cap)
 		s += "\t\tAudio\n";
 	if (cap & V4L2_CAP_RADIO)
 		s += "\t\tRadio\n";
+	if (cap & V4L2_CAP_IO_MC)
+		s += "\t\tI/O MC\n";
 	if (cap & V4L2_CAP_READWRITE)
 		s += "\t\tRead/Write\n";
-	if (cap & V4L2_CAP_ASYNCIO)
-		s += "\t\tAsync I/O\n";
 	if (cap & V4L2_CAP_STREAMING)
 		s += "\t\tStreaming\n";
 	if (cap & V4L2_CAP_EXT_PIX_FORMAT)
@@ -111,6 +106,8 @@ static std::string subdevcap2s(unsigned cap)
 
 	if (cap & V4L2_SUBDEV_CAP_RO_SUBDEV)
 		s += "\t\tRead-Only Sub-Device\n";
+	if (cap & V4L2_SUBDEV_CAP_STREAMS)
+		s += "\t\tStreams Support\n";
 	return s;
 }
 
@@ -209,6 +206,7 @@ static constexpr flag_def bufcap_def[] = {
 	{ V4L2_BUF_CAP_SUPPORTS_ORPHANED_BUFS, "orphaned-bufs" },
 	{ V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF, "m2m-hold-capture-buf" },
 	{ V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS, "mmap-cache-hints" },
+	{ V4L2_BUF_CAP_SUPPORTS_MAX_NUM_BUFFERS, "max-num-buffers" },
 	{ 0, nullptr }
 };
 
@@ -347,6 +345,7 @@ std::string quantization2s(int val)
 
 static constexpr flag_def pixflags_def[] = {
 	{ V4L2_PIX_FMT_FLAG_PREMUL_ALPHA,  "premultiplied-alpha" },
+	{ V4L2_PIX_FMT_FLAG_SET_CSC,  "set-csc" },
 	{ 0, nullptr }
 };
 
@@ -531,6 +530,7 @@ std::string ctrlflags2s(__u32 flags)
 		{ V4L2_CTRL_FLAG_HAS_PAYLOAD,"has-payload" },
 		{ V4L2_CTRL_FLAG_EXECUTE_ON_WRITE, "execute-on-write" },
 		{ V4L2_CTRL_FLAG_MODIFY_LAYOUT, "modify-layout" },
+		{ V4L2_CTRL_FLAG_DYNAMIC_ARRAY, "dynamic-array" },
 		{ 0, nullptr }
 	};
 	return flags2s(flags, def);
@@ -766,4 +766,110 @@ static const flag_def vbi_def[] = {
 std::string vbiflags2s(__u32 flags)
 {
 	return flags2s(flags, vbi_def);
+}
+
+std::string ttype2s(int type)
+{
+	switch (type) {
+		case V4L2_TUNER_RADIO: return "radio";
+		case V4L2_TUNER_ANALOG_TV: return "Analog TV";
+		case V4L2_TUNER_DIGITAL_TV: return "Digital TV";
+		case V4L2_TUNER_SDR: return "SDR";
+		case V4L2_TUNER_RF: return "RF";
+		default: return "unknown";
+	}
+}
+
+std::string audmode2s(int audmode)
+{
+	switch (audmode) {
+		case V4L2_TUNER_MODE_STEREO: return "stereo";
+		case V4L2_TUNER_MODE_LANG1: return "lang1";
+		case V4L2_TUNER_MODE_LANG2: return "lang2";
+		case V4L2_TUNER_MODE_LANG1_LANG2: return "bilingual";
+		case V4L2_TUNER_MODE_MONO: return "mono";
+		default: return "unknown";
+	}
+}
+
+std::string rxsubchans2s(int rxsubchans)
+{
+	std::string s;
+
+	if (rxsubchans & V4L2_TUNER_SUB_MONO)
+		s += "mono ";
+	if (rxsubchans & V4L2_TUNER_SUB_STEREO)
+		s += "stereo ";
+	if (rxsubchans & V4L2_TUNER_SUB_LANG1)
+		s += "lang1 ";
+	if (rxsubchans & V4L2_TUNER_SUB_LANG2)
+		s += "lang2 ";
+	if (rxsubchans & V4L2_TUNER_SUB_RDS)
+		s += "rds ";
+	return s;
+}
+
+std::string txsubchans2s(int txsubchans)
+{
+	std::string s;
+
+	if (txsubchans & V4L2_TUNER_SUB_MONO)
+		s += "mono ";
+	if (txsubchans & V4L2_TUNER_SUB_STEREO)
+		s += "stereo ";
+	if (txsubchans & V4L2_TUNER_SUB_LANG1)
+		s += "bilingual ";
+	if (txsubchans & V4L2_TUNER_SUB_SAP)
+		s += "sap ";
+	if (txsubchans & V4L2_TUNER_SUB_RDS)
+		s += "rds ";
+	return s;
+}
+
+std::string tcap2s(unsigned cap)
+{
+	std::string s;
+
+	if (cap & V4L2_TUNER_CAP_LOW)
+		s += "62.5 Hz ";
+	else if (cap & V4L2_TUNER_CAP_1HZ)
+		s += "1 Hz ";
+	else
+		s += "62.5 kHz ";
+	if (cap & V4L2_TUNER_CAP_NORM)
+		s += "multi-standard ";
+	if (cap & V4L2_TUNER_CAP_HWSEEK_BOUNDED)
+		s += "hwseek-bounded ";
+	if (cap & V4L2_TUNER_CAP_HWSEEK_WRAP)
+		s += "hwseek-wrap ";
+	if (cap & V4L2_TUNER_CAP_STEREO)
+		s += "stereo ";
+	if (cap & V4L2_TUNER_CAP_LANG1)
+		s += "lang1 ";
+	if (cap & V4L2_TUNER_CAP_LANG2)
+		s += "lang2 ";
+	if (cap & V4L2_TUNER_CAP_RDS)
+		s += "rds ";
+	if (cap & V4L2_TUNER_CAP_RDS_BLOCK_IO)
+		s += "rds-block-I/O ";
+	if (cap & V4L2_TUNER_CAP_RDS_CONTROLS)
+		s += "rds-controls ";
+	if (cap & V4L2_TUNER_CAP_FREQ_BANDS)
+		s += "freq-bands ";
+	if (cap & V4L2_TUNER_CAP_HWSEEK_PROG_LIM)
+		s += "hwseek-prog-lim ";
+	return s;
+}
+
+std::string modulation2s(unsigned modulation)
+{
+	switch (modulation) {
+	case V4L2_BAND_MODULATION_VSB:
+		return "VSB";
+	case V4L2_BAND_MODULATION_FM:
+		return "FM";
+	case V4L2_BAND_MODULATION_AM:
+		return "AM";
+	}
+	return "Unknown";
 }

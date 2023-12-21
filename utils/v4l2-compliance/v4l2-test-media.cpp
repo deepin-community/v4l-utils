@@ -1,7 +1,7 @@
 /*
     V4L2 API subdev ioctl tests.
 
-    Copyright (C) 2018  Hans Verkuil <hans.verkuil@cisco.com>
+    Copyright (C) 2018  Hans Verkuil <hverkuil-cisco@xs4all.nl>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -32,8 +32,9 @@ int testMediaDeviceInfo(struct node *node)
 	struct media_device_info mdinfo;
 
 	memset(&mdinfo, 0xff, sizeof(mdinfo));
-	fail_on_test(doioctl(node, MEDIA_IOC_DEVICE_INFO, nullptr) != EFAULT);
 	fail_on_test(doioctl(node, MEDIA_IOC_DEVICE_INFO, &mdinfo));
+	if (has_mmu)
+		fail_on_test(doioctl(node, MEDIA_IOC_DEVICE_INFO, nullptr) != EFAULT);
 	fail_on_test(check_0(mdinfo.reserved, sizeof(mdinfo.reserved)));
 	fail_on_test(check_string(mdinfo.driver, sizeof(mdinfo.driver)));
 	fail_on_test(mdinfo.model[0] && check_string(mdinfo.model, sizeof(mdinfo.model)));
@@ -127,21 +128,23 @@ int testMediaTopology(struct node *node)
 	fail_on_test(topology.reserved2);
 	fail_on_test(topology.reserved3);
 	fail_on_test(topology.reserved4);
-	topology.ptr_entities = 4;
-	fail_on_test(doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
-	topology.ptr_entities = 0;
-	topology.ptr_interfaces = 4;
-	fail_on_test(topology.num_interfaces &&
-		     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
-	topology.ptr_interfaces = 0;
-	topology.ptr_pads = 4;
-	fail_on_test(topology.num_pads &&
-		     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
-	topology.ptr_pads = 0;
-	topology.ptr_links = 4;
-	fail_on_test(topology.num_links &&
-		     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
-	topology.ptr_links = 0;
+	if (has_mmu) {
+		topology.ptr_entities = 4;
+		fail_on_test(doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
+		topology.ptr_entities = 0;
+		topology.ptr_interfaces = 4;
+		fail_on_test(topology.num_interfaces &&
+			     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
+		topology.ptr_interfaces = 0;
+		topology.ptr_pads = 4;
+		fail_on_test(topology.num_pads &&
+			     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
+		topology.ptr_pads = 0;
+		topology.ptr_links = 4;
+		fail_on_test(topology.num_links &&
+			     doioctl(node, MEDIA_IOC_G_TOPOLOGY, &topology) != EFAULT);
+		topology.ptr_links = 0;
+	}
 	v2_ents = new media_v2_entity[topology.num_entities];
 	memset(v2_ents, 0xff, topology.num_entities * sizeof(*v2_ents));
 	topology.ptr_entities = (uintptr_t)v2_ents;
@@ -258,7 +261,10 @@ int testMediaTopology(struct node *node)
 
 	for (unsigned i = 0; i < topology.num_links; i++) {
 		media_v2_link &link = v2_links[i];
-		bool is_iface = link.flags & MEDIA_LNK_FL_LINK_TYPE;
+		bool is_iface = (link.flags & MEDIA_LNK_FL_LINK_TYPE) ==
+			MEDIA_LNK_FL_INTERFACE_LINK;
+		bool is_anc_link = (link.flags & MEDIA_LNK_FL_LINK_TYPE) ==
+			MEDIA_LNK_FL_ANCILLARY_LINK;
 
 		fail_on_test(check_0(link.reserved, sizeof(link.reserved)));
 		fail_on_test(!link.id);
@@ -276,9 +282,17 @@ int testMediaTopology(struct node *node)
 			media_v2_entity &ent = *v2_entity_map[link.sink_id];
 
 			if (show_info)
-				printf("\t\tLink: 0x%08x (%s to interface %s)\n", link.id,
+				printf("\t\tInterface Link: 0x%08x (%s to %s)\n", link.id,
 				       ent.name, devpath.c_str());
 			ents_with_intf.insert(ent.id);
+		} else if (is_anc_link) {
+			fail_on_test(v2_entities_set.find(link.source_id) == v2_entities_set.end());
+			fail_on_test(v2_entities_set.find(link.sink_id) == v2_entities_set.end());
+			media_v2_entity &src_ent = *v2_entity_map[link.source_id];
+			media_v2_entity &sink_ent = *v2_entity_map[link.sink_id];
+			if (show_info)
+				printf("\t\tAncillary Link: 0x%08x (%s <-> %s)\n", link.id,
+				       src_ent.name, sink_ent.name);
 		} else {
 			fail_on_test(v2_pads_set.find(link.source_id) == v2_pads_set.end());
 			fail_on_test(v2_pads_set.find(link.sink_id) == v2_pads_set.end());
@@ -287,7 +301,7 @@ int testMediaTopology(struct node *node)
 			fail_on_test(!(v2_pad_map[link.sink_id]->flags & MEDIA_PAD_FL_SINK));
 			num_data_links++;
 			if (show_info)
-				printf("\t\tLink: 0x%08x (%s:%u -> %s:%u, %s)\n", link.id,
+				printf("\t\tData Link: 0x%08x (%s:%u -> %s:%u, %s)\n", link.id,
 				       v2_entity_map[v2_pad_map[link.source_id]->entity_id]->name,
 				       v2_pad_map[link.source_id]->index,
 				       v2_entity_map[v2_pad_map[link.sink_id]->entity_id]->name,
@@ -394,12 +408,14 @@ int testMediaEnum(struct node *node)
 		fail_on_test(links.entity != ent.id);
 		fail_on_test(links.pads);
 		fail_on_test(links.links);
-		links.pads = (struct media_pad_desc *)4;
-		fail_on_test(ent.pads && doioctl(node, MEDIA_IOC_ENUM_LINKS, &links) != EFAULT);
-		links.pads = nullptr;
-		links.links = (struct media_link_desc *)4;
-		fail_on_test(ent.links && doioctl(node, MEDIA_IOC_ENUM_LINKS, &links) != EFAULT);
-		links.links = nullptr;
+		if (has_mmu) {
+			links.pads = (struct media_pad_desc *)4;
+			fail_on_test(ent.pads && doioctl(node, MEDIA_IOC_ENUM_LINKS, &links) != EFAULT);
+			links.pads = nullptr;
+			links.links = (struct media_link_desc *)4;
+			fail_on_test(ent.links && doioctl(node, MEDIA_IOC_ENUM_LINKS, &links) != EFAULT);
+			links.links = nullptr;
+		}
 		links.pads = new media_pad_desc[ent.pads];
 		memset(links.pads, 0xff, ent.pads * sizeof(*links.pads));
 		links.links = new media_link_desc[ent.links];
@@ -455,7 +471,7 @@ int testMediaEnum(struct node *node)
 				link_disabled = links.links[i];
 
 			// This ioctl only returns data links
-			fail_on_test(fl & MEDIA_LNK_FL_LINK_TYPE);
+			fail_on_test((fl & MEDIA_LNK_FL_LINK_TYPE) != MEDIA_LNK_FL_DATA_LINK);
 			fail_on_test(links.links[i].sink.entity == links.links[i].source.entity);
 			if (is_sink) {
 				fail_on_test(links.links[i].sink.index >= ent.pads);
@@ -596,7 +612,7 @@ void walkTopology(struct node &node, struct node &expbuf_node,
 		}
 
 		testNode(test_node, test_node, expbuf_node, type,
-			 frame_count, all_fmt_frame_count);
+			 frame_count, all_fmt_frame_count, node.g_fd());
 		test_node.close();
 	}
 }

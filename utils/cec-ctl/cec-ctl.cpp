@@ -25,20 +25,17 @@
 #include "cec-log.h"
 #include "cec-parse.h"
 
-#ifdef __ANDROID__
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
-
 #include "cec-ctl.h"
 #include "compiler.h"
 
 static struct timespec start_monotonic;
 static struct timeval start_timeofday;
+static time_t valid_until_t;
 static bool ignore_la[16];
 static const char *edid_path;
 static bool is_paused;
+
+#define CEC_CTL_VERSION 2
 
 #define POLL_FAKE_OPCODE 256
 static unsigned short ignore_opcode[257];
@@ -124,8 +121,9 @@ enum Option {
 	OptFeatSetAudioRate,
 	OptFeatSinkHasARCTx,
 	OptFeatSourceHasARCRx,
-	OptStressTestPowerCycle,
-	OptTestPowerCycle,
+	OptTestStandbyWakeupCycle,
+	OptStressTestStandbyWakeupCycle,
+	OptStressTestRandomStandbyWakeupCycle,
 	OptVendorCommand = 508,
 	OptVendorCommandWithID,
 	OptVendorRemoteButtonDown,
@@ -225,8 +223,14 @@ static struct option long_options[] = {
 	{ "vendor-command", required_argument, nullptr, OptVendorCommand }, \
 	{ "custom-command", required_argument, nullptr, OptCustomCommand }, \
 
-	{ "test-power-cycle", optional_argument, nullptr, OptTestPowerCycle }, \
-	{ "stress-test-power-cycle", required_argument, nullptr, OptStressTestPowerCycle }, \
+	// Keep old option names for backwards compatibility
+	{ "test-power-cycle", optional_argument, nullptr, OptTestStandbyWakeupCycle }, \
+	{ "stress-test-power-cycle", required_argument, nullptr, OptStressTestStandbyWakeupCycle }, \
+	{ "test-random-power-states", required_argument, nullptr, OptStressTestRandomStandbyWakeupCycle }, \
+
+	{ "test-standby-wakeup-cycle", optional_argument, nullptr, OptTestStandbyWakeupCycle }, \
+	{ "stress-test-standby-wakeup-cycle", required_argument, nullptr, OptStressTestStandbyWakeupCycle }, \
+	{ "stress-test-random-standby-wakeup-cycle", required_argument, nullptr, OptStressTestRandomStandbyWakeupCycle }, \
 
 	{ nullptr, 0, nullptr, 0 }
 };
@@ -322,14 +326,15 @@ static void usage()
 	       "                           Use - for stdout.\n"
 	       "  --analyze-pin <from>     Analyze the low-level CEC pin changes from the file <from>.\n"
 	       "                           Use - for stdin.\n"
-	       "  --test-power-cycle [polls=<n>][,sleep=<secs>]\n"
-	       "                           Test power cycle behavior of the display. It polls up to\n"
+	       "  --test-standby-wakeup-cycle [polls=<n>][,sleep=<secs>][,hpd-may-be-low=<0/1>]\n"
+	       "                           Test standby-wakeup cycle behavior of the display. It polls up to\n"
 	       "                           <n> times (default 15), waiting for a state change. If\n"
 	       "                           that fails it waits <secs> seconds (default 10) before\n"
 	       "                           retrying this.\n"
-	       "  --stress-test-power-cycle cnt=<count>[,polls=<n>][,max-sleep=<maxsecs>][,min-sleep=<minsecs>][,seed=<seed>][,repeats=<reps>]\n"
-	       "                            [,sleep-before-on=<secs1>][,sleep-before-off=<secs2>]\n"
-	       "                           Power cycle display <count> times. If 0, then never stop.\n"
+	       "                           If <hpd-may-be-low> is 1, then the HPD is allowed to be low when in standby.\n"
+	       "  --stress-test-standby-wakeup-cycle cnt=<count>[,polls=<n>][,max-sleep=<maxsecs>][,min-sleep=<minsecs>][,seed=<seed>][,repeats=<reps>]\n"
+	       "                            [,sleep-before-on=<secs1>][,sleep-before-off=<secs2>][,hpd-may-be-low=<0/1>]\n"
+	       "                           Standby-Wakeup cycle display <count> times. If 0, then never stop.\n"
 	       "                           It polls up to <n> times (default 30), waiting for a state change.\n"
 	       "                           If <maxsecs> is non-zero (0 is the default), then sleep for\n"
 	       "                           a random number of seconds between <minsecs> (0 is the default) and <maxsecs>\n"
@@ -342,6 +347,18 @@ static void usage()
 	       "                           before transmitting <Image View On>.\n"
 	       "                           If <secs2> is specified, then sleep for <secs2> seconds\n"
 	       "                           before transmitting <Standby>.\n"
+	       "                           If <hpd-may-be-low> is 1, then the HPD is allowed to be low when in standby.\n"
+	       "  --stress-test-random-standby-wakeup-cycle cnt=<count>[,max-sleep=<maxsecs>][,min-sleep=<minsecs>][,seed=<seed>][,hpd-may-be-low=<0/1>]\n"
+	       "                           Randomly transmit <Standby> or <Image View On> up to <count> times.\n"
+	       "			   If <count> is 0, then never stop. After each transmit wait between\n"
+	       "                           <min-sleep> (default 0) and <max-sleep> (default 10) seconds.\n"
+	       "                           If <seed> is specified, then set the randomizer seed to\n"
+	       "                           that value instead of using the current time as seed.\n"
+	       "                           If <hpd-may-be-low> is 1, then the HPD is allowed to be low when in standby.\n"
+	       "                           This test does not check if the display reached the new state,\n"
+	       "                           it checks if the display can handle this situation without\n"
+	       "                           locking up. After every 10 cycles it attempts to properly\n"
+	       "                           wake up the display and check if that works. If not, this test fails.\n"
 	       "\n"
 	       CEC_PARSE_USAGE
 	       "\n"
@@ -368,37 +385,50 @@ static const char *power_status2s(__u8 power_status)
 
 std::string ts2s(__u64 ts)
 {
+	static char buf[64];
+	static unsigned last_secs;
+	static time_t last_t;
 	std::string s;
-	struct timeval sub;
+	struct timeval sub = {};
 	struct timeval res;
-	__u64 diff;
-	char buf[64];
+	unsigned secs;
+	__s64 diff;
 	time_t t;
 
 	if (!options[OptWallClock]) {
-		sprintf(buf, "%llu.%03llus", ts / 1000000000, (ts % 1000000000) / 1000000);
+		sprintf(buf, "%llu.%06llus", ts / 1000000000, (ts % 1000000000) / 1000);
 		return buf;
 	}
 	diff = ts - start_monotonic.tv_sec * 1000000000ULL - start_monotonic.tv_nsec;
-	sub.tv_sec = diff / 1000000000ULL;
-	sub.tv_usec = (diff % 1000000000ULL) / 1000;
+	if (diff >= 0) {
+		sub.tv_sec = diff / 1000000000ULL;
+		sub.tv_usec = (diff % 1000000000ULL) / 1000;
+	}
 	timeradd(&start_timeofday, &sub, &res);
 	t = res.tv_sec;
-	s = ctime(&t);
-	s = s.substr(0, s.length() - 6);
-	sprintf(buf, "%03lu", res.tv_usec / 1000);
-	return s + "." + buf;
+	if (t >= valid_until_t) {
+		struct tm tm = *localtime(&t);
+		last_secs = tm.tm_min * 60 + tm.tm_sec;
+		last_t = t;
+		valid_until_t = t + 60 - last_secs;
+		strftime(buf, sizeof(buf), "%a %b %e %T.000000", &tm);
+	}
+	secs = last_secs + t - last_t;
+	sprintf(buf + 14, "%02u:%02u.%06lu", secs / 60, secs % 60, res.tv_usec);
+	return buf;
 }
 
 std::string ts2s(double ts)
 {
+	__u64 t = static_cast<__u64>(ts * 1000000000.0);
+
 	if (!options[OptWallClock]) {
 		char buf[64];
 
-		sprintf(buf, "%10.06f", ts);
+		sprintf(buf, "%llu.%06llu", t / 1000000000, (t % 1000000000) / 1000);
 		return buf;
 	}
-	return ts2s(static_cast<__u64>(ts * 1000000000.0));
+	return ts2s(t);
 }
 
 static __u64 current_ts()
@@ -467,23 +497,37 @@ static const char *event2s(__u32 event)
 	}
 }
 
-static void log_event(struct cec_event &ev, bool show)
+static void log_event(struct cec_event &ev, bool show, bool pin_logging = false)
 {
 	bool is_high = ev.event == CEC_EVENT_PIN_CEC_HIGH;
+	bool is_initial = ev.flags & CEC_EVENT_FL_INITIAL_STATE;
 	__u16 pa;
 
 	if (ev.event != CEC_EVENT_PIN_CEC_LOW && ev.event != CEC_EVENT_PIN_CEC_HIGH &&
 	    ev.event != CEC_EVENT_PIN_HPD_LOW && ev.event != CEC_EVENT_PIN_HPD_HIGH &&
 	    ev.event != CEC_EVENT_PIN_5V_LOW && ev.event != CEC_EVENT_PIN_5V_HIGH)
 		printf("\n");
+
 	if ((ev.flags & CEC_EVENT_FL_DROPPED_EVENTS) && show)
 		printf("(warn: %s events were lost)\n", event2s(ev.event));
-	if ((ev.flags & CEC_EVENT_FL_INITIAL_STATE) && show)
-		printf("Initial ");
+	if (show) {
+		if (is_initial) {
+			printf("Initial ");
+		} else if (ev.event != CEC_EVENT_PIN_CEC_LOW && ev.event != CEC_EVENT_PIN_CEC_HIGH) {
+			if (pin_logging)
+				printf("%s: ", ts2s(ev.ts / 1000000000.0).c_str());
+			else
+				printf("%s: ", ts2s(ev.ts).c_str());
+		}
+	}
+
 	switch (ev.event) {
 	case CEC_EVENT_STATE_CHANGE:
 		pa = ev.state_change.phys_addr;
-		if (show)
+		if (show && pin_logging)
+			printf("Event: State Change: PA: %x.%x.%x.%x, LA mask: 0x%04x\n",
+			       cec_phys_addr_exp(pa), ev.state_change.log_addr_mask);
+		else if (show)
 			printf("Event: State Change: PA: %x.%x.%x.%x, LA mask: 0x%04x, Conn Info: %s\n",
 			       cec_phys_addr_exp(pa),
 			       ev.state_change.log_addr_mask,
@@ -518,8 +562,6 @@ static void log_event(struct cec_event &ev, bool show)
 			printf("Event: Unknown (0x%x)\n", ev.event);
 		break;
 	}
-	if (verbose && show)
-		printf("\tTimestamp: %s\n", ts2s(ev.ts).c_str());
 }
 
 /*
@@ -760,12 +802,12 @@ static void generate_eob_event(__u64 ts, FILE *fstore)
 	};
 
 	if (fstore) {
-		fprintf(fstore, "%llu.%09llu %d\n",
+		fprintf(fstore, "%llu.%09llu 0x%x\n",
 			ev_eob.ts / 1000000000, ev_eob.ts % 1000000000,
 			ev_eob.event - CEC_EVENT_PIN_CEC_LOW);
 		fflush(fstore);
 	}
-	log_event(ev_eob, fstore != stdout);
+	log_event(ev_eob, fstore != stdout, true);
 }
 
 static void show_msg(const cec_msg &msg)
@@ -788,8 +830,11 @@ static void show_msg(const cec_msg &msg)
 		log_raw_msg(&msg);
 	std::string status;
 	if ((msg.tx_status & ~CEC_TX_STATUS_OK) ||
-	    (msg.rx_status & ~CEC_RX_STATUS_OK))
+	    (msg.rx_status & ~CEC_RX_STATUS_OK)) {
 		status = std::string(" ") + cec_status2s(msg);
+		if (verbose)
+			printf("\tTimestamp: %s\n", ts2s(current_ts()).c_str());
+	}
 	if (verbose && transmitted)
 		printf("\tSequence: %u Tx Timestamp: %s%s\n",
 		       msg.sequence, ts2s(msg.tx_ts).c_str(),
@@ -843,7 +888,8 @@ static void wait_for_msgs(const struct node &node, __u32 monitor_time)
 	}
 }
 
-#define MONITOR_FL_DROPPED_EVENTS     (1 << 16)
+#define MONITOR_STATE_CHANGE		0x10
+#define MONITOR_FL_DROPPED_EVENTS	(1 << 16)
 
 static void monitor(const struct node &node, __u32 monitor_time, const char *store_pin)
 {
@@ -852,11 +898,11 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 	fd_set ex_fds;
 	int fd = node.fd;
 	FILE *fstore = nullptr;
-	time_t t;
+	time_t t, start_minute;
 
 	if (options[OptMonitorAll])
 		monitor = CEC_MODE_MONITOR_ALL;
-	else if (options[OptMonitorPin] || options[OptStorePin])
+	else if (options[OptMonitorPin])
 		monitor = CEC_MODE_MONITOR_PIN;
 
 	if (!(node.caps & CEC_CAP_MONITOR_ALL) && monitor == CEC_MODE_MONITOR_ALL) {
@@ -895,7 +941,7 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 			std::exit(EXIT_FAILURE);
 		}
 		fprintf(fstore, "# cec-ctl --store-pin\n");
-		fprintf(fstore, "# version 1\n");
+		fprintf(fstore, "# version %d\n", CEC_CTL_VERSION);
 		fprintf(fstore, "# start_monotonic %lu.%09lu\n",
 			start_monotonic.tv_sec, start_monotonic.tv_nsec);
 		fprintf(fstore, "# start_timeofday %lu.%06lu\n",
@@ -909,14 +955,18 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 		printf("\n");
 
 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
-	t = time(nullptr) + monitor_time;
+	start_minute = time(nullptr);
+	t = start_minute + monitor_time;
 
-	while (!monitor_time || time(nullptr) < t) {
+	while (1) {
+		time_t now = time(nullptr);
 		struct timeval tv = { 1, 0 };
 		bool pin_event = false;
 		int res;
 
 		fflush(stdout);
+		if (monitor_time && now >= t)
+			break;
 		FD_ZERO(&rd_fds);
 		FD_ZERO(&ex_fds);
 		FD_SET(fd, &rd_fds);
@@ -924,6 +974,23 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 		res = select(fd + 1, &rd_fds, nullptr, &ex_fds, &tv);
 		if (res < 0)
 			break;
+		if (store_pin && now - start_minute > 60 &&
+		    (FD_ISSET(fd, &rd_fds) || FD_ISSET(fd, &ex_fds))) {
+			/*
+			 * The drift between the monotonic and wallclock
+			 * time can be quite high (1 ms per minute), so
+			 * report this once a minute to ensure a sane
+			 * wallclock time when analyzing this later.
+			 */
+			clock_gettime(CLOCK_MONOTONIC, &start_monotonic);
+			gettimeofday(&start_timeofday, nullptr);
+			fprintf(fstore, "# start_monotonic %lu.%09lu\n",
+				start_monotonic.tv_sec, start_monotonic.tv_nsec);
+			fprintf(fstore, "# start_timeofday %lu.%06lu\n",
+				start_timeofday.tv_sec, start_timeofday.tv_usec);
+			fflush(fstore);
+			start_minute = now;
+		}
 		if (FD_ISSET(fd, &rd_fds)) {
 			struct cec_msg msg = { };
 
@@ -947,18 +1014,30 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 			    ev.event == CEC_EVENT_PIN_5V_LOW ||
 			    ev.event == CEC_EVENT_PIN_5V_HIGH)
 				pin_event = true;
-			generate_eob_event(ev.ts, fstore);
-			if (pin_event && fstore) {
+			if (ev.event == CEC_EVENT_PIN_CEC_LOW ||
+			    ev.event == CEC_EVENT_PIN_CEC_HIGH)
+				generate_eob_event(ev.ts, fstore);
+			if (fstore && ev.event == CEC_EVENT_STATE_CHANGE) {
+				unsigned int v = MONITOR_STATE_CHANGE;
+
+				if (ev.flags & CEC_EVENT_FL_DROPPED_EVENTS)
+					v |= MONITOR_FL_DROPPED_EVENTS;
+
+				fprintf(fstore, "%llu.%09llu 0x%x 0x%04x 0x%04x\n",
+					ev.ts / 1000000000, ev.ts % 1000000000, v,
+					ev.state_change.phys_addr, ev.state_change.log_addr_mask);
+				fflush(fstore);
+			} else if (fstore && pin_event) {
 				unsigned int v = ev.event - CEC_EVENT_PIN_CEC_LOW;
 
 				if (ev.flags & CEC_EVENT_FL_DROPPED_EVENTS)
 					v |= MONITOR_FL_DROPPED_EVENTS;
-				fprintf(fstore, "%llu.%09llu %d\n",
+				fprintf(fstore, "%llu.%09llu 0x%x\n",
 					ev.ts / 1000000000, ev.ts % 1000000000, v);
 				fflush(fstore);
 			}
 			if (!pin_event || options[OptMonitorPin])
-				log_event(ev, fstore != stdout);
+				log_event(ev, fstore != stdout, true);
 		}
 		if (!res && eob_ts) {
 			struct timespec ts;
@@ -971,6 +1050,31 @@ static void monitor(const struct node &node, __u32 monitor_time, const char *sto
 	}
 	if (fstore && fstore != stdout)
 		fclose(fstore);
+}
+
+static unsigned read_val(char **p)
+{
+	unsigned v = 0;
+
+	while (**p == ' ')
+		(*p)++;
+
+	if ((*p)[0] == '0' && (*p)[1] == 'x') {
+		(*p) += 2;
+		while (isxdigit(**p)) {
+			if (isdigit(**p))
+				v = v * 16 + **p - '0';
+			else
+				v = v * 16 + tolower(**p) - 'a' + 10;
+			(*p)++;
+		}
+	} else {
+		while (isdigit(**p)) {
+			v = v * 10 + **p - '0';
+			(*p)++;
+		}
+	}
+	return v;
 }
 
 static void analyze(const char *analyze_pin)
@@ -998,9 +1102,13 @@ static void analyze(const char *analyze_pin)
 		goto err;
 	line++;
 	if (!fgets(s, sizeof(s), fanalyze) ||
-	    sscanf(s, "# version %u\n", &version) != 1 ||
-	    version != 1)
+	    sscanf(s, "# version %u\n", &version) != 1)
 		goto err;
+	if (version > CEC_CTL_VERSION) {
+		fprintf(stderr, "Pin store file has version %d, but we only support up to version %d\n",
+			version, CEC_CTL_VERSION);
+		std::exit(EXIT_FAILURE);
+	}
 	line++;
 	if (!fgets(s, sizeof(s), fanalyze) ||
 	    sscanf(s, "# start_monotonic %lu.%09lu\n", &tv_sec, &tv_nsec) != 2 ||
@@ -1030,31 +1138,71 @@ static void analyze(const char *analyze_pin)
 
 	while (fgets(s, sizeof(s), fanalyze)) {
 		unsigned event;
+		char *p = s;
 
-		if (s[0] == '#' || s[0] == '\n') {
+		if (s[0] == '#') {
+			if (sscanf(s, "# start_monotonic %lu.%09lu\n", &tv_sec, &tv_nsec) == 2 &&
+			    tv_nsec < 1000000000) {
+				start_monotonic.tv_sec = tv_sec;
+				start_monotonic.tv_nsec = tv_nsec;
+			} else if (sscanf(s, "# start_timeofday %lu.%06lu\n", &tv_sec, &tv_usec) == 2 &&
+				   tv_usec < 1000000) {
+				start_timeofday.tv_sec = tv_sec;
+				start_timeofday.tv_usec = tv_usec;
+				valid_until_t = 0;
+			}
+			line++;
+			continue;
+		} else if (s[0] == '\n') {
 			line++;
 			continue;
 		}
-		if (sscanf(s, "%lu.%09lu %d\n", &tv_sec, &tv_nsec, &event) != 3 ||
-		    (event & ~MONITOR_FL_DROPPED_EVENTS) > 5) {
+		tv_sec = tv_nsec = event = 0;
+		while (isdigit(*p))
+			tv_sec = tv_sec * 10 + *p++ - '0';
+		if (*p == '.')
+			p++;
+		while (isdigit(*p))
+			tv_nsec = tv_nsec * 10 + *p++ - '0';
+		event = read_val(&p);
+
+		bool dropped_events = event & MONITOR_FL_DROPPED_EVENTS;
+		event &= ~MONITOR_FL_DROPPED_EVENTS;
+
+		__u16 pa = 0;
+		__u16 la_mask = 0;
+
+		if (event == MONITOR_STATE_CHANGE) {
+			pa = read_val(&p);
+			la_mask = read_val(&p);
+		}
+		if (*p != '\n') {
 			fprintf(stderr, "malformed data at line %d\n", line);
+			break;
+		}
+		if (event != MONITOR_STATE_CHANGE && event > 5) {
+			fprintf(stderr, "unknown event at line %d\n", line);
 			break;
 		}
 		ev.ts = tv_sec * 1000000000ULL + tv_nsec;
 		ev.flags = 0;
-		if (event & MONITOR_FL_DROPPED_EVENTS) {
-			event &= ~MONITOR_FL_DROPPED_EVENTS;
+		if (dropped_events)
 			ev.flags = CEC_EVENT_FL_DROPPED_EVENTS;
+		if (event == MONITOR_STATE_CHANGE) {
+			ev.event = CEC_EVENT_STATE_CHANGE;
+			ev.state_change.phys_addr = pa;
+			ev.state_change.log_addr_mask = la_mask;
+		} else {
+			ev.event = event + CEC_EVENT_PIN_CEC_LOW;
 		}
-		ev.event = event + CEC_EVENT_PIN_CEC_LOW;
-		log_event(ev, true);
+		log_event(ev, true, true);
 		line++;
 	}
 
 	if (eob_ts) {
 		ev.event = CEC_EVENT_PIN_CEC_HIGH;
 		ev.ts = eob_ts;
-		log_event(ev, true);
+		log_event(ev, true, true);
 	}
 
 	if (fanalyze != stdin)
@@ -1153,7 +1301,7 @@ static int transmit_msg_retry(const struct node &node, struct cec_msg &msg)
 	return ret;
 }
 
-static int init_power_cycle_test(const struct node &node, unsigned repeats, unsigned max_tries)
+static int init_standby_wakeup_cycle_test(const struct node &node, unsigned repeats, unsigned max_tries)
 {
 	struct cec_msg msg;
 	unsigned from;
@@ -1182,7 +1330,7 @@ static int init_power_cycle_test(const struct node &node, unsigned repeats, unsi
 	} else {
 		switch (laddrs.log_addr_type[0]) {
 		case CEC_LOG_ADDR_TYPE_TV:
-			fprintf(stderr, "A TV can't run the power cycle test.\n");
+			fprintf(stderr, "A TV can't run the standby-wakeup cycle test.\n");
 			std::exit(EXIT_FAILURE);
 		case CEC_LOG_ADDR_TYPE_RECORD:
 			from = CEC_LOG_ADDR_RECORD_1;
@@ -1230,15 +1378,12 @@ static int init_power_cycle_test(const struct node &node, unsigned repeats, unsi
 			printf("Transmit Standby to TV: ");
 			fflush(stdout);
 			cec_msg_init(&msg, from, CEC_LOG_ADDR_TV);
-			static bool sent;
 			cec_msg_standby(&msg);
 
 			tries = 0;
 			unsigned hpd_is_low_cnt = 0;
 			for (;;) {
-			if (!sent) { sent=true;
 				ret = transmit_msg_retry(node, msg);
-			} else ret = 0;
 				// The first standby transmit must always succeed,
 				// later standbys may fail with ENONET
 				if (ret && (ret != ENONET || !tries)) {
@@ -1295,8 +1440,8 @@ static int init_power_cycle_test(const struct node &node, unsigned repeats, unsi
 	return from;
 }
 
-static void test_power_cycle(const struct node &node, unsigned int max_tries,
-			     unsigned int retry_sleep)
+static void test_standby_wakeup_cycle(const struct node &node, unsigned int max_tries,
+				      unsigned int retry_sleep, bool hpd_may_be_low)
 {
 	struct cec_log_addrs laddrs = { };
 	struct cec_msg msg;
@@ -1309,7 +1454,7 @@ static void test_power_cycle(const struct node &node, unsigned int max_tries,
 	__u8 wakeup_la;
 	int ret;
 
-	from = init_power_cycle_test(node, 2, max_tries);
+	from = init_standby_wakeup_cycle_test(node, 2, max_tries);
 
 	doioctl(&node, CEC_ADAP_G_LOG_ADDRS, &laddrs);
 	if (laddrs.log_addr[0] != CEC_LOG_ADDR_INVALID)
@@ -1317,10 +1462,11 @@ static void test_power_cycle(const struct node &node, unsigned int max_tries,
 	else
 		wakeup_la = CEC_LOG_ADDR_UNREGISTERED;
 
-	bool hpd_is_low = wakeup_la == CEC_LOG_ADDR_UNREGISTERED;
+	bool hpd_is_low = (wakeup_la == CEC_LOG_ADDR_UNREGISTERED) || hpd_may_be_low;
 
 	printf("The Hotplug Detect pin %s when in Standby\n\n",
-	       hpd_is_low ? "is pulled low" : "remains high");
+	       hpd_may_be_low ? "may be pulled low" :
+	       (hpd_is_low ? "is pulled low" : "remains high"));
 
 	for (unsigned iter = 0; iter <= 2 * 12; iter++) {
 		unsigned i = iter / 2;
@@ -1507,10 +1653,11 @@ static void test_power_cycle(const struct node &node, unsigned int max_tries,
 		printf("Test had %u failure%s\n", failures, failures == 1 ? "" : "s");
 }
 
-static void stress_test_power_cycle(const struct node &node, unsigned cnt,
-				    double min_sleep, double max_sleep, unsigned max_tries,
-				    bool has_seed, unsigned seed, unsigned repeats,
-				    double sleep_before_on, double sleep_before_off)
+static void stress_test_standby_wakeup_cycle(const struct node &node, unsigned cnt,
+					     double min_sleep, double max_sleep, unsigned max_tries,
+					     bool has_seed, unsigned seed, unsigned repeats,
+					     double sleep_before_on, double sleep_before_off,
+					     bool hpd_may_be_low)
 {
 	struct cec_log_addrs laddrs = { };
 	struct cec_msg msg;
@@ -1532,7 +1679,7 @@ static void stress_test_power_cycle(const struct node &node, unsigned cnt,
 	if (mod_usleep)
 		printf("Randomizer seed: %u\n\n", seed);
 
-	unsigned from = init_power_cycle_test(node, repeats, max_tries);
+	unsigned from = init_standby_wakeup_cycle_test(node, repeats, max_tries);
 
 	doioctl(&node, CEC_ADAP_G_LOG_ADDRS, &laddrs);
 	if (laddrs.log_addr[0] != CEC_LOG_ADDR_INVALID)
@@ -1540,10 +1687,11 @@ static void stress_test_power_cycle(const struct node &node, unsigned cnt,
 	else
 		wakeup_la = CEC_LOG_ADDR_UNREGISTERED;
 
-	bool hpd_is_low = wakeup_la == CEC_LOG_ADDR_UNREGISTERED;
+	bool hpd_is_low = (wakeup_la == CEC_LOG_ADDR_UNREGISTERED) || hpd_may_be_low;
 
 	printf("The Hotplug Detect pin %s when in Standby\n\n",
-	       hpd_is_low ? "is pulled low" : "remains high");
+	       hpd_may_be_low ? "may be pulled low" :
+	       (hpd_is_low ? "is pulled low" : "remains high"));
 
 	srandom(seed);
 
@@ -1741,6 +1889,201 @@ static void stress_test_power_cycle(const struct node &node, unsigned cnt,
 		printf(" %d second%s\n", tries, tries == 1 ? "" : "s");
 	}
 }
+
+static void stress_test_random_standby_wakeup_cycle(const struct node &node, unsigned cnt,
+						    double min_sleep, double max_sleep,
+						    bool has_seed, unsigned seed,
+						    bool hpd_may_be_low)
+{
+	struct cec_log_addrs laddrs = { };
+	struct cec_msg msg;
+	unsigned iter = 0;
+	unsigned min_usleep = 1000000.0 * (max_sleep ? min_sleep : 0);
+	unsigned mod_usleep = 0;
+	unsigned from, wakeup_la;
+	__u16 pa;
+	int ret;
+
+	if (max_sleep)
+		mod_usleep = 1000000.0 * (max_sleep - min_sleep) + 1;
+
+	if (!has_seed)
+		seed = time(nullptr);
+
+	if (mod_usleep)
+		printf("Randomizer seed: %u\n\n", seed);
+
+	doioctl(&node, CEC_ADAP_G_PHYS_ADDR, &pa);
+	if (pa == CEC_PHYS_ADDR_INVALID || !pa) {
+		cec_msg_init(&msg, 0xf, CEC_LOG_ADDR_TV);
+		cec_msg_image_view_on(&msg);
+		if (transmit_msg_retry(node, msg)) {
+			printf("FAIL: Image View On failed\n");
+			std::exit(EXIT_FAILURE);
+		}
+		sleep(15);
+		doioctl(&node, CEC_ADAP_G_PHYS_ADDR, &pa);
+		if (pa == CEC_PHYS_ADDR_INVALID || !pa) {
+			printf("FAIL: invalid physical address\n");
+			std::exit(EXIT_FAILURE);
+		}
+		printf("Physical Address: %x.%x.%x.%x\n",
+		       cec_phys_addr_exp(pa));
+	}
+
+	doioctl(&node, CEC_ADAP_G_LOG_ADDRS, &laddrs);
+	if (laddrs.log_addr[0] == CEC_LOG_ADDR_INVALID) {
+		printf("FAIL: invalid logical address\n");
+		std::exit(EXIT_FAILURE);
+	}
+	from = laddrs.log_addr[0];
+
+	init_standby_wakeup_cycle_test(node, 2, 30);
+
+	doioctl(&node, CEC_ADAP_G_LOG_ADDRS, &laddrs);
+	if (laddrs.log_addr[0] != CEC_LOG_ADDR_INVALID)
+		wakeup_la = laddrs.log_addr[0];
+	else
+		wakeup_la = CEC_LOG_ADDR_UNREGISTERED;
+
+	bool hpd_is_low = (wakeup_la == CEC_LOG_ADDR_UNREGISTERED) || hpd_may_be_low;
+
+	printf("The Hotplug Detect pin %s when in Standby\n\n",
+	       hpd_may_be_low ? "may be pulled low" :
+	       (hpd_is_low ? "is pulled low" : "remains high"));
+
+	srandom(seed);
+
+	for (;;) {
+		unsigned usecs1 = mod_usleep ? random() % mod_usleep : 0;
+		unsigned usecs2 = mod_usleep ? random() % mod_usleep : 0;
+
+		usecs1 += min_usleep;
+		usecs2 += min_usleep;
+
+		iter++;
+
+		bool verify_result = iter % 10 == 0;
+
+		if (verify_result)
+			usecs1 = 30 * 1000000;
+
+		if (usecs1)
+			printf("%s: Sleep %.2fs before Image View On\n", ts2s(current_ts()).c_str(),
+			       usecs1 / 1000000.0);
+		fflush(stdout);
+		usleep(usecs1);
+		printf("%s: ", ts2s(current_ts()).c_str());
+		printf("Transmit Image View On from LA %s (iteration %u): ", cec_la2s(wakeup_la), iter);
+
+		cec_msg_init(&msg, wakeup_la, CEC_LOG_ADDR_TV);
+		cec_msg_image_view_on(&msg);
+		for (int i = 0; i < 50; i++) {
+			ret = transmit_msg_retry(node, msg);
+			if (!ret)
+				break;
+			usleep(200000);
+		}
+		if (ret)
+			printf("%s\n", strerror(ret));
+		else
+			printf("OK\n");
+
+		if (verify_result) {
+			printf("%s: Sleep %.2fs before verifying power state\n", ts2s(current_ts()).c_str(),
+			       usecs1 / 1000000.0);
+			fflush(stdout);
+			usleep(usecs1);
+			cec_msg_init(&msg, from, CEC_LOG_ADDR_TV);
+			cec_msg_give_device_power_status(&msg, true);
+			printf("%s: ", ts2s(current_ts()).c_str());
+			printf("Transmit Give Device Power Status from LA %s: ", cec_la2s(from));
+			ret = transmit_msg_retry(node, msg);
+			if (!ret) {
+				if (cec_msg_status_is_ok(&msg)) {
+					__u8 pwr;
+
+					cec_ops_report_power_status(&msg, &pwr);
+					printf("%s\n", power_status2s(pwr));
+					if (pwr == CEC_OP_POWER_STATUS_ON)
+						goto done;
+				} else {
+					printf("%s\n", cec_status2s(msg).c_str());
+				}
+			} else {
+				printf("%s\n", strerror(ret));
+			}
+			printf("%s: ", ts2s(current_ts()).c_str());
+			printf("Retry transmit Image View On from LA %s: ", cec_la2s(wakeup_la));
+
+			cec_msg_init(&msg, wakeup_la, CEC_LOG_ADDR_TV);
+			cec_msg_image_view_on(&msg);
+			ret = transmit_msg_retry(node, msg);
+			if (ret) {
+				printf("%s\n", strerror(ret));
+				printf("FAIL: never woke up\n");
+				std::exit(EXIT_FAILURE);
+			}
+			printf("OK\n");
+			printf("%s: Sleep %.2fs before verifying power state\n", ts2s(current_ts()).c_str(),
+			       usecs1 / 1000000.0);
+			fflush(stdout);
+			usleep(usecs1);
+			cec_msg_init(&msg, from, CEC_LOG_ADDR_TV);
+			cec_msg_give_device_power_status(&msg, true);
+			printf("%s: ", ts2s(current_ts()).c_str());
+			printf("Retry transmit Give Device Power Status from LA %s: ", cec_la2s(from));
+			ret = transmit_msg_retry(node, msg);
+			if (ret) {
+				printf("%s\n", strerror(ret));
+			} else if (!cec_msg_status_is_ok(&msg)) {
+				printf("%s\n", cec_status2s(msg).c_str());
+			} else {
+				__u8 pwr;
+
+				cec_ops_report_power_status(&msg, &pwr);
+				printf("%s\n", power_status2s(pwr));
+				if (pwr == CEC_OP_POWER_STATUS_ON)
+					goto done;
+			}
+			printf("FAIL: never woke up\n");
+			std::exit(EXIT_FAILURE);
+		}
+done:
+
+		if (cnt && iter == cnt)
+			break;
+
+		if (usecs2)
+			printf("%s: Sleep %.2fs before Standby\n", ts2s(current_ts()).c_str(),
+			       usecs2 / 1000000.0);
+		fflush(stdout);
+		usleep(usecs2);
+		printf("%s: ", ts2s(current_ts()).c_str());
+		printf("Transmit Standby from LA %s (iteration %u): ", cec_la2s(from), iter);
+
+		/*
+		 * Some displays only accept Standby from the Active Source.
+		 * So make us the Active Source before sending Standby.
+		 */
+		cec_msg_init(&msg, from, CEC_LOG_ADDR_TV);
+		cec_msg_active_source(&msg, pa);
+		transmit_msg_retry(node, msg);
+		cec_msg_init(&msg, from, CEC_LOG_ADDR_TV);
+		cec_msg_standby(&msg);
+		for (int i = 0; i < 50; i++) {
+			ret = transmit_msg_retry(node, msg);
+			if (!ret)
+				break;
+			usleep(200000);
+		}
+		if (ret)
+			printf("%s\n", strerror(ret));
+		else
+			printf("OK\n");
+	}
+}
+
 
 static int calc_node_val(const char *s)
 {
@@ -1957,17 +2300,25 @@ int main(int argc, char **argv)
 	__u32 timeout = 1000;
 	__u32 monitor_time = 0;
 	__u32 vendor_id = 0x000c03; /* HDMI LLC vendor ID */
-	unsigned int stress_test_pwr_cycle_cnt = 0;
-	double stress_test_pwr_cycle_min_sleep = 0;
-	double stress_test_pwr_cycle_max_sleep = 0;
-	unsigned int stress_test_pwr_cycle_polls = 30;
-	bool stress_test_pwr_cycle_has_seed = false;
-	unsigned int stress_test_pwr_cycle_seed = 0;
-	unsigned int stress_test_pwr_cycle_repeats = 0;
-	double stress_test_pwr_cycle_sleep_before_on = 0;
-	double stress_test_pwr_cycle_sleep_before_off = 0;
-	unsigned int test_pwr_cycle_polls = 15;
-	unsigned int test_pwr_cycle_sleep = 10;
+	unsigned int stress_test_standby_wakeup_cycle_cnt = 0;
+	double stress_test_standby_wakeup_cycle_min_sleep = 0;
+	double stress_test_standby_wakeup_cycle_max_sleep = 0;
+	unsigned int stress_test_standby_wakeup_cycle_polls = 30;
+	bool stress_test_standby_wakeup_cycle_has_seed = false;
+	unsigned int stress_test_standby_wakeup_cycle_seed = 0;
+	unsigned int stress_test_standby_wakeup_cycle_repeats = 0;
+	double stress_test_standby_wakeup_cycle_sleep_before_on = 0;
+	double stress_test_standby_wakeup_cycle_sleep_before_off = 0;
+	bool stress_test_standby_wakeup_cycle_hpd_may_be_low = false;
+	unsigned int test_standby_wakeup_cycle_polls = 15;
+	unsigned int test_standby_wakeup_cycle_sleep = 10;
+	bool test_standby_wakeup_cycle_hpd_may_be_low = false;
+	unsigned int stress_test_random_standby_wakeup_cnt = 0;
+	double stress_test_random_standby_wakeup_min_sleep = 0;
+	double stress_test_random_standby_wakeup_max_sleep = 10;
+	bool stress_test_random_standby_wakeup_has_seed = false;
+	unsigned int stress_test_random_standby_wakeup_seed = 0;
+	bool stress_test_random_standby_wakeup_hpd_may_be_low = false;
 	bool warn_if_unconfigured = false;
 	__u16 phys_addr;
 	__u8 from = 0, to = 0, first_to = 0xff;
@@ -2343,10 +2694,11 @@ int main(int argc, char **argv)
 			list_devices();
 			break;
 
-		case OptTestPowerCycle: {
+		case OptTestStandbyWakeupCycle: {
 			static constexpr const char *arg_names[] = {
 				"polls",
 				"sleep",
+				"hpd-may-be-low",
 				nullptr
 			};
 			char *value, *subs = optarg;
@@ -2358,10 +2710,13 @@ int main(int argc, char **argv)
 			while (*subs != '\0') {
 				switch (cec_parse_subopt(&subs, arg_names, &value)) {
 				case 0:
-					test_pwr_cycle_polls = strtoul(value, nullptr, 0);
+					test_standby_wakeup_cycle_polls = strtoul(value, nullptr, 0);
 					break;
 				case 1:
-					test_pwr_cycle_sleep = strtoul(value, nullptr, 0);
+					test_standby_wakeup_cycle_sleep = strtoul(value, nullptr, 0);
+					break;
+				case 2:
+					test_standby_wakeup_cycle_hpd_may_be_low = true;
 					break;
 				default:
 					std::exit(EXIT_FAILURE);
@@ -2370,7 +2725,7 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		case OptStressTestPowerCycle: {
+		case OptStressTestStandbyWakeupCycle: {
 			static constexpr const char *arg_names[] = {
 				"cnt",
 				"min-sleep",
@@ -2380,6 +2735,7 @@ int main(int argc, char **argv)
 				"sleep-before-on",
 				"sleep-before-off",
 				"polls",
+				"hpd-may-be-low",
 				nullptr
 			};
 			char *value, *subs = optarg;
@@ -2387,35 +2743,79 @@ int main(int argc, char **argv)
 			while (*subs != '\0') {
 				switch (cec_parse_subopt(&subs, arg_names, &value)) {
 				case 0:
-					stress_test_pwr_cycle_cnt = strtoul(value, nullptr, 0);
+					stress_test_standby_wakeup_cycle_cnt = strtoul(value, nullptr, 0);
 					break;
 				case 1:
-					stress_test_pwr_cycle_min_sleep = strtod(value, nullptr);
+					stress_test_standby_wakeup_cycle_min_sleep = strtod(value, nullptr);
 					break;
 				case 2:
-					stress_test_pwr_cycle_max_sleep = strtod(value, nullptr);
+					stress_test_standby_wakeup_cycle_max_sleep = strtod(value, nullptr);
 					break;
 				case 3:
-					stress_test_pwr_cycle_has_seed = true;
-					stress_test_pwr_cycle_seed = strtoul(value, nullptr, 0);
+					stress_test_standby_wakeup_cycle_has_seed = true;
+					stress_test_standby_wakeup_cycle_seed = strtoul(value, nullptr, 0);
 					break;
 				case 4:
-					stress_test_pwr_cycle_repeats = strtoul(value, nullptr, 0);
+					stress_test_standby_wakeup_cycle_repeats = strtoul(value, nullptr, 0);
 					break;
 				case 5:
-					stress_test_pwr_cycle_sleep_before_on = strtod(value, nullptr);
+					stress_test_standby_wakeup_cycle_sleep_before_on = strtod(value, nullptr);
 					break;
 				case 6:
-					stress_test_pwr_cycle_sleep_before_off = strtod(value, nullptr);
+					stress_test_standby_wakeup_cycle_sleep_before_off = strtod(value, nullptr);
 					break;
 				case 7:
-					stress_test_pwr_cycle_polls = strtoul(value, nullptr, 0);
+					stress_test_standby_wakeup_cycle_polls = strtoul(value, nullptr, 0);
+					break;
+				case 8:
+					stress_test_standby_wakeup_cycle_hpd_may_be_low = true;
 					break;
 				default:
 					std::exit(EXIT_FAILURE);
 				}
 			}
-			if (stress_test_pwr_cycle_min_sleep > stress_test_pwr_cycle_max_sleep) {
+			if (stress_test_standby_wakeup_cycle_min_sleep > stress_test_standby_wakeup_cycle_max_sleep) {
+				fprintf(stderr, "min-sleep > max-sleep\n");
+				std::exit(EXIT_FAILURE);
+			}
+			warn_if_unconfigured = true;
+			break;
+		}
+
+		case OptStressTestRandomStandbyWakeupCycle: {
+			static constexpr const char *arg_names[] = {
+				"cnt",
+				"min-sleep",
+				"max-sleep",
+				"seed",
+				"hpd-may-be-low",
+				nullptr
+			};
+			char *value, *subs = optarg;
+
+			while (*subs != '\0') {
+				switch (cec_parse_subopt(&subs, arg_names, &value)) {
+				case 0:
+					stress_test_random_standby_wakeup_cnt = strtoul(value, nullptr, 0);
+					break;
+				case 1:
+					stress_test_random_standby_wakeup_min_sleep = strtod(value, nullptr);
+					break;
+				case 2:
+					stress_test_random_standby_wakeup_max_sleep = strtod(value, nullptr);
+					break;
+				case 3:
+					stress_test_random_standby_wakeup_has_seed = true;
+					stress_test_random_standby_wakeup_seed = strtoul(value, nullptr, 0);
+					break;
+				case 4:
+					stress_test_random_standby_wakeup_hpd_may_be_low = true;
+					break;
+				default:
+					std::exit(EXIT_FAILURE);
+				}
+			}
+			if (stress_test_random_standby_wakeup_min_sleep > stress_test_random_standby_wakeup_max_sleep) {
 				fprintf(stderr, "min-sleep > max-sleep\n");
 				std::exit(EXIT_FAILURE);
 			}
@@ -2690,7 +3090,9 @@ int main(int argc, char **argv)
 			phys_addrs[la] = (phys_addr << 8) | la;
 	}
 
-	if (options[OptTestPowerCycle] || options[OptStressTestPowerCycle]) {
+	if (options[OptTestStandbyWakeupCycle] ||
+	    options[OptStressTestStandbyWakeupCycle] ||
+	    options[OptStressTestRandomStandbyWakeupCycle]) {
 		print_version();
 		printf("\n");
 	}
@@ -2715,7 +3117,7 @@ int main(int argc, char **argv)
 
 	if (node.num_log_addrs == 0) {
 		if (options[OptMonitor] || options[OptMonitorAll] ||
-		    options[OptMonitorPin] || options[OptStorePin])
+		    options[OptMonitorPin])
 			goto skip_la;
 		if (warn_if_unconfigured)
 			fprintf(stderr, "\nAdapter is unconfigured, please configure it first.\n");
@@ -2790,22 +3192,35 @@ int main(int argc, char **argv)
 	if (options[OptNonBlocking])
 		fcntl(node.fd, F_SETFL, fcntl(node.fd, F_GETFL) & ~O_NONBLOCK);
 
-	if (options[OptTestPowerCycle])
-		test_power_cycle(node, test_pwr_cycle_polls, test_pwr_cycle_sleep);
-	if (options[OptStressTestPowerCycle])
-		stress_test_power_cycle(node, stress_test_pwr_cycle_cnt,
-					stress_test_pwr_cycle_min_sleep,
-					stress_test_pwr_cycle_max_sleep,
-					stress_test_pwr_cycle_polls,
-					stress_test_pwr_cycle_has_seed,
-					stress_test_pwr_cycle_seed,
-					stress_test_pwr_cycle_repeats,
-					stress_test_pwr_cycle_sleep_before_on,
-					stress_test_pwr_cycle_sleep_before_off);
+	if (options[OptTestStandbyWakeupCycle])
+		test_standby_wakeup_cycle(node,
+					  test_standby_wakeup_cycle_polls,
+					  test_standby_wakeup_cycle_sleep,
+					  test_standby_wakeup_cycle_hpd_may_be_low);
+	if (options[OptStressTestStandbyWakeupCycle])
+		stress_test_standby_wakeup_cycle(node,
+						 stress_test_standby_wakeup_cycle_cnt,
+						 stress_test_standby_wakeup_cycle_min_sleep,
+						 stress_test_standby_wakeup_cycle_max_sleep,
+						 stress_test_standby_wakeup_cycle_polls,
+						 stress_test_standby_wakeup_cycle_has_seed,
+						 stress_test_standby_wakeup_cycle_seed,
+						 stress_test_standby_wakeup_cycle_repeats,
+						 stress_test_standby_wakeup_cycle_sleep_before_on,
+						 stress_test_standby_wakeup_cycle_sleep_before_off,
+						 stress_test_standby_wakeup_cycle_hpd_may_be_low);
+	if (options[OptStressTestRandomStandbyWakeupCycle])
+		stress_test_random_standby_wakeup_cycle(node,
+							stress_test_random_standby_wakeup_cnt,
+							stress_test_random_standby_wakeup_min_sleep,
+							stress_test_random_standby_wakeup_max_sleep,
+							stress_test_random_standby_wakeup_has_seed,
+							stress_test_random_standby_wakeup_seed,
+							stress_test_random_standby_wakeup_hpd_may_be_low);
 
 skip_la:
 	if (options[OptMonitor] || options[OptMonitorAll] ||
-	    options[OptMonitorPin] || options[OptStorePin]) {
+	    options[OptMonitorPin]) {
 		monitor(node, monitor_time, store_pin);
 	} else if (options[OptWaitForMsgs]) {
 		wait_for_msgs(node, monitor_time);

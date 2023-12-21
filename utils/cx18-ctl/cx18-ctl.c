@@ -19,7 +19,6 @@
     Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335  USA
  */
 
-#include <config.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -36,6 +35,7 @@
 #include <math.h>
 
 #include <linux/videodev2.h>
+#include <v4l-getsubopt.h>
 
 /* copied from cx18-driver.h */
 #define CX18_DBGFLG_WARN  (1 << 0)
@@ -279,7 +279,7 @@ int main(int argc, char **argv)
 		case OptSetGPIO:
 			subs = optarg;
 			while (*subs != '\0') {
-				switch (getsubopt(&subs, subopts, &value)) {
+				switch (v4l_getsubopt(&subs, subopts, &value)) {
 				case SUB_DIR:
 					if (value == NULL) {
 						fprintf(stderr,
