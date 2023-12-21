@@ -151,7 +151,9 @@ CaptureWinGLEngine::CaptureWinGLEngine() :
 	m_min_filter(GL_NEAREST)
 {
 	makeCurrent();
+#if QT_VERSION < 0x060000
 	m_glfunction.initializeGLFunctions(context());
+#endif
 }
 
 CaptureWinGLEngine::~CaptureWinGLEngine()
@@ -196,6 +198,8 @@ void CaptureWinGLEngine::setColorspace(unsigned colorspace, unsigned xfer_func,
 	case V4L2_PIX_FMT_XYUV32:
 	case V4L2_PIX_FMT_VUYA32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVA32:
+	case V4L2_PIX_FMT_YUVX32:
 	case V4L2_PIX_FMT_HSV24:
 	case V4L2_PIX_FMT_HSV32:
 		is_rgb = false;
@@ -283,6 +287,9 @@ void CaptureWinGLEngine::stop()
 
 void CaptureWinGLEngine::initializeGL()
 {
+#if QT_VERSION >= 0x060000
+	initializeOpenGLFunctions();
+#endif
 	glShadeModel(GL_FLAT);
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
@@ -335,7 +342,11 @@ void CaptureWinGLEngine::setFrame(int width, int height, int WCrop, int HCrop,
 	m_frameData = data;
 	m_frameData2 = data2 ? data2 : data;
 	m_frameData3 = data3 ? data3 : data;
+#if QT_VERSION < 0x060000
 	updateGL();
+#else
+	update();
+#endif
 }
 
 void CaptureWinGLEngine::checkError(const char *msg)
@@ -415,6 +426,8 @@ bool CaptureWinGLEngine::hasNativeFormat(__u32 format)
 		V4L2_PIX_FMT_XYUV32,
 		V4L2_PIX_FMT_VUYA32,
 		V4L2_PIX_FMT_VUYX32,
+		V4L2_PIX_FMT_YUVA32,
+		V4L2_PIX_FMT_YUVX32,
 		V4L2_PIX_FMT_GREY,
 		V4L2_PIX_FMT_Z16,
 		V4L2_PIX_FMT_INZI,
@@ -427,8 +440,13 @@ bool CaptureWinGLEngine::hasNativeFormat(__u32 format)
 		0
 	};
 
+#if QT_VERSION < 0x060000
 	if (!m_glfunction.hasOpenGLFeature(QGLFunctions::Shaders))
 		return false;
+#else
+	if (!hasOpenGLFeature(QOpenGLFunctions::Shaders))
+		return false;
+#endif
 
 	for (int i = 0; supported_fmts[i]; i++)
 		if (supported_fmts[i] == format)
@@ -445,7 +463,11 @@ void CaptureWinGLEngine::changeShader()
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	glOrtho(0, m_frameWidth, m_frameHeight, 0, 0, 1);
+#if QT_VERSION < 0x060000
 	resizeGL(QGLWidget::width(), QGLWidget::height());
+#else
+	resizeGL(QOpenGLWidget::width(), QOpenGLWidget::height());
+#endif
 	checkError("Render settings.\n");
 
 	switch (m_frameFormat) {
@@ -483,6 +505,8 @@ void CaptureWinGLEngine::changeShader()
 	case V4L2_PIX_FMT_XYUV32:
 	case V4L2_PIX_FMT_VUYA32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVA32:
+	case V4L2_PIX_FMT_YUVX32:
 		shader_YUV_packed(m_frameFormat);
 		break;
 
@@ -651,6 +675,8 @@ void CaptureWinGLEngine::paintGL()
 	case V4L2_PIX_FMT_XYUV32:
 	case V4L2_PIX_FMT_VUYA32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVA32:
+	case V4L2_PIX_FMT_YUVX32:
 		render_YUV_packed(m_frameFormat);
 		break;
 
@@ -1002,7 +1028,12 @@ void CaptureWinGLEngine::shader_YUV(__u32 format)
 			   codeSuffix;
 
 	bool src_c = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, codeHead + codeTail);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				codeHead + codeTail);
 
 	if (!src_c)
 		fprintf(stderr, "OpenGL Error: YUV shader compilation failed.\n");
@@ -1045,7 +1076,11 @@ void CaptureWinGLEngine::render_YUV(__u32 format)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#endif
 	glUniform1i(Y, 0);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 			m_glRed, GL_UNSIGNED_BYTE, m_frameData);
@@ -1053,7 +1088,11 @@ void CaptureWinGLEngine::render_YUV(__u32 format)
 
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[1]);
+#if QT_VERSION < 0x060000
 	GLint U = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "utex");
+#else
+	GLint U = glGetUniformLocation(m_shaderProgram.programId(), "utex");
+#endif
 	glUniform1i(U, 1);
 	switch (format) {
 	case V4L2_PIX_FMT_YUV422P:
@@ -1079,7 +1118,11 @@ void CaptureWinGLEngine::render_YUV(__u32 format)
 
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[2]);
+#if QT_VERSION < 0x060000
 	GLint V = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "vtex");
+#else
+	GLint V = glGetUniformLocation(m_shaderProgram.programId(), "vtex");
+#endif
 	glUniform1i(V, 2);
 	switch (format) {
 	case V4L2_PIX_FMT_YUV422P:
@@ -1181,7 +1224,11 @@ void CaptureWinGLEngine::shader_NV12(__u32 format)
 			   codeSuffix;
 
 	bool src_c = m_shaderProgram.addShaderFromSourceCode(
+#if QT_VERSION < 0x060000
 				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
 				QString("%1%2%3").arg(codeHead, codeBody, codeTail));
 
 	if (!src_c)
@@ -1203,7 +1250,11 @@ void CaptureWinGLEngine::render_NV12(__u32 format)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#endif
 	glUniform1i(Y, 0);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 			m_glRed, GL_UNSIGNED_BYTE, m_frameData);
@@ -1211,7 +1262,11 @@ void CaptureWinGLEngine::render_NV12(__u32 format)
 
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[1]);
+#if QT_VERSION < 0x060000
 	GLint U = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#else
+	GLint U = glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#endif
 	glUniform1i(U, 1);
 	switch (format) {
 	case V4L2_PIX_FMT_NV12:
@@ -1299,7 +1354,11 @@ void CaptureWinGLEngine::shader_NV24(__u32 format)
 			   codeSuffix;
 
 	bool src_c = m_shaderProgram.addShaderFromSourceCode(
+#if QT_VERSION < 0x060000
 				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
 				QString("%1%2%3").arg(codeHead, codeBody, codeTail));
 
 	if (!src_c)
@@ -1319,7 +1378,11 @@ void CaptureWinGLEngine::render_NV24(__u32 format)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#endif
 	glUniform1i(Y, 0);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 			m_glRed, GL_UNSIGNED_BYTE, m_frameData);
@@ -1327,7 +1390,11 @@ void CaptureWinGLEngine::render_NV24(__u32 format)
 
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[1]);
+#if QT_VERSION < 0x060000
 	GLint U = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#else
+	GLint U = glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#endif
 	glUniform1i(U, 1);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 			m_glRedGreen, GL_UNSIGNED_BYTE,
@@ -1411,8 +1478,12 @@ void CaptureWinGLEngine::shader_NV16(__u32 format)
 			   codeSuffix;
 
 	bool src_ok = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, QString("%1%2%3").arg(codeHead, codeBody, codeTail)
-				);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				QString("%1%2%3").arg(codeHead, codeBody, codeTail));
 
 	if (!src_ok)
 		fprintf(stderr, "OpenGL Error: NV16 shader compilation failed.\n");
@@ -1432,7 +1503,11 @@ void CaptureWinGLEngine::render_NV16(__u32 format)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "ytex");
+#endif
 	glUniform1i(Y, 0);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 			m_glRed, GL_UNSIGNED_BYTE, m_frameData);
@@ -1440,7 +1515,11 @@ void CaptureWinGLEngine::render_NV16(__u32 format)
 
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[1]);
+#if QT_VERSION < 0x060000
 	GLint UV = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#else
+	GLint UV = glGetUniformLocation(m_shaderProgram.programId(), "uvtex");
+#endif
 	glUniform1i(UV, 1);
 	switch (format) {
 	case V4L2_PIX_FMT_NV16:
@@ -1551,8 +1630,12 @@ void CaptureWinGLEngine::shader_YUY2(__u32 format)
 			   codeSuffix;
 
 	bool src_ok = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, QString("%1%2%3").arg(codeHead, codeBody, codeTail)
-				);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				QString("%1%2%3").arg(codeHead, codeBody, codeTail));
 
 	if (!src_ok)
 		fprintf(stderr, "OpenGL Error: YUY2 shader compilation failed.\n");
@@ -1572,7 +1655,11 @@ void CaptureWinGLEngine::render_YUY2(__u32 format)
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#endif
 	glUniform1i(Y, 0);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth / 2, m_frameHeight,
 			GL_RGBA, GL_UNSIGNED_BYTE, m_frameData);
@@ -1777,8 +1864,12 @@ void CaptureWinGLEngine::shader_RGB(__u32 format)
 		    (hasAlpha ? codeSuffixWithAlpha : codeSuffix);
 
 	bool src_ok = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, QString("%1%2").arg(codeHead, codeTail)
-				);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				QString("%1%2").arg(codeHead, codeTail));
 
 	if (!src_ok)
 		fprintf(stderr, "OpenGL Error: RGB shader compilation failed.\n");
@@ -1790,7 +1881,11 @@ void CaptureWinGLEngine::render_RGB(__u32 format)
 {
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#endif
 	glUniform1i(Y, 0);
 	int idx = glGetUniformLocation(m_shaderProgram.programId(), "tex_h"); // Texture height
 	glUniform1f(idx, m_frameHeight);
@@ -2008,8 +2103,12 @@ void CaptureWinGLEngine::shader_Bayer(__u32 format)
 		    codeSuffix;
 
 	bool src_ok = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, QString("%1%2").arg(codeHead, codeTail)
-				);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				QString("%1%2").arg(codeHead, codeTail));
 
 	if (!src_ok)
 		fprintf(stderr, "OpenGL Error: Bayer shader compilation failed.\n");
@@ -2021,7 +2120,11 @@ void CaptureWinGLEngine::render_Bayer(__u32 format)
 {
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#endif
 	glUniform1i(Y, 0);
 	int idx = glGetUniformLocation(m_shaderProgram.programId(), "tex_h"); // Texture height
 	glUniform1f(idx, m_frameHeight);
@@ -2100,6 +2203,13 @@ void CaptureWinGLEngine::shader_YUV_packed(__u32 format)
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_frameWidth, m_frameHeight, 0,
 			     GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
 		break;
+	case V4L2_PIX_FMT_YUVA32:
+		hasAlpha = true;
+		// fall-through
+	case V4L2_PIX_FMT_YUVX32:
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_frameWidth, m_frameHeight, 0,
+			     GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+		break;
 	}
 
 	checkError("Packed YUV shader");
@@ -2131,8 +2241,12 @@ void CaptureWinGLEngine::shader_YUV_packed(__u32 format)
 			   (hasAlpha ? codeSuffixWithAlpha : codeSuffix);
 
 	bool src_ok = m_shaderProgram.addShaderFromSourceCode(
-				QGLShader::Fragment, QString("%1%2").arg(codeHead, codeTail)
-				);
+#if QT_VERSION < 0x060000
+				QGLShader::Fragment,
+#else
+				QOpenGLShader::Fragment,
+#endif
+				QString("%1%2").arg(codeHead, codeTail));
 
 	if (!src_ok)
 		fprintf(stderr, "OpenGL Error: Packed YUV shader compilation failed.\n");
@@ -2144,7 +2258,11 @@ void CaptureWinGLEngine::render_YUV_packed(__u32 format)
 {
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_screenTexture[0]);
+#if QT_VERSION < 0x060000
 	GLint Y = m_glfunction.glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#else
+	GLint Y = glGetUniformLocation(m_shaderProgram.programId(), "tex");
+#endif
 	glUniform1i(Y, 0);
 	int idx = glGetUniformLocation(m_shaderProgram.programId(), "tex_h"); // Texture height
 	glUniform1f(idx, m_frameHeight);
@@ -2173,6 +2291,8 @@ void CaptureWinGLEngine::render_YUV_packed(__u32 format)
 		break;
 	case V4L2_PIX_FMT_VUYA32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVA32:
+	case V4L2_PIX_FMT_YUVX32:
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
 				GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, m_frameData);
 		break;

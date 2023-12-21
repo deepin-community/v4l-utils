@@ -220,7 +220,8 @@ int testQueryExtControls(struct node *node)
 		}
 
 		if (which == V4L2_CTRL_CLASS_USER &&
-		    (qctrl.type < V4L2_CTRL_COMPOUND_TYPES) &&
+		    qctrl.type < V4L2_CTRL_COMPOUND_TYPES &&
+		    !qctrl.nr_of_dims &&
 		    qctrl.type != V4L2_CTRL_TYPE_INTEGER64 &&
 		    qctrl.type != V4L2_CTRL_TYPE_STRING &&
 		    qctrl.type != V4L2_CTRL_TYPE_CTRL_CLASS) {
@@ -363,7 +364,8 @@ int testQueryControls(struct node *node)
 			break;
 		id = qctrl.id;
 		fail_on_test(node->controls.find(qctrl.id) == node->controls.end());
-		fail_on_test(qctrl.step || qctrl.minimum || qctrl.maximum || qctrl.default_value);
+		if (qctrl.type >= V4L2_CTRL_COMPOUND_TYPES)
+			fail_on_test(qctrl.step || qctrl.minimum || qctrl.maximum || qctrl.default_value);
 		compound_controls++;
 	}
 	fail_on_test(compound_controls != num_compound_ctrls);
@@ -439,7 +441,7 @@ int testSimpleControls(struct node *node)
 	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
 		test_query_ext_ctrl &qctrl = iter->second;
 
-		if (qctrl.type >= V4L2_CTRL_COMPOUND_TYPES)
+		if (qctrl.type >= V4L2_CTRL_COMPOUND_TYPES || qctrl.nr_of_dims)
 			continue;
 		if (is_vivid && V4L2_CTRL_ID2WHICH(qctrl.id) == V4L2_CTRL_CLASS_VIVID)
 			continue;
@@ -485,6 +487,8 @@ int testSimpleControls(struct node *node)
 		} else if (ret == EILSEQ) {
 			warn("s_ctrl returned EILSEQ\n");
 			ret = 0;
+		} else if (ret == EACCES && is_uvcvideo) {
+			ret = 0;
 		} else if (ret) {
 			return fail("s_ctrl returned an error (%d)\n", ret);
 		}
@@ -498,7 +502,8 @@ int testSimpleControls(struct node *node)
 			ctrl.id = qctrl.id;
 			ctrl.value = qctrl.minimum - 1;
 			ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
-			if (ret && ret != EIO && ret != EILSEQ && ret != ERANGE)
+			if (ret && ret != EIO && ret != EILSEQ && ret != ERANGE &&
+			    !(ret == EACCES && is_uvcvideo))
 				return fail("invalid minimum range check\n");
 			if (!ret && checkSimpleCtrl(ctrl, qctrl))
 				return fail("invalid control %08x\n", qctrl.id);
@@ -508,7 +513,8 @@ int testSimpleControls(struct node *node)
 			ctrl.id = qctrl.id;
 			ctrl.value = qctrl.maximum + 1;
 			ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
-			if (ret && ret != EIO && ret != EILSEQ && ret != ERANGE)
+			if (ret && ret != EIO && ret != EILSEQ && ret != ERANGE &&
+			    !(ret == EACCES && is_uvcvideo))
 				return fail("invalid maximum range check\n");
 			if (!ret && checkSimpleCtrl(ctrl, qctrl))
 				return fail("invalid control %08x\n", qctrl.id);
@@ -521,7 +527,8 @@ int testSimpleControls(struct node *node)
 			if (ret == ERANGE)
 				warn("%s: returns ERANGE for in-range, but non-step-multiple value\n",
 						qctrl.name);
-			else if (ret && ret != EIO && ret != EILSEQ)
+			else if (ret && ret != EIO && ret != EILSEQ &&
+				 !(ret == EACCES && is_uvcvideo))
 				return fail("returns error for in-range, but non-step-multiple value\n");
 		}
 
@@ -539,6 +546,8 @@ int testSimpleControls(struct node *node)
 				ctrl.id = qctrl.id;
 				ctrl.value = i;
 				ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
+				if (valid && ret == EACCES && is_uvcvideo)
+					continue;
 				if (valid && ret)
 					return fail("could not set valid menu item %d\n", i);
 				if (!valid && !ret)
@@ -551,15 +560,18 @@ int testSimpleControls(struct node *node)
 			ctrl.id = qctrl.id;
 			ctrl.value = qctrl.minimum;
 			ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
-			if (ret && ret != EIO && ret != EILSEQ)
+			if (ret && ret != EIO && ret != EILSEQ &&
+			    !(ret == EACCES && is_uvcvideo))
 				return fail("could not set minimum value\n");
 			ctrl.value = qctrl.maximum;
 			ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
-			if (ret && ret != EIO && ret != EILSEQ)
+			if (ret && ret != EIO && ret != EILSEQ &&
+			    !(ret == EACCES && is_uvcvideo))
 				return fail("could not set maximum value\n");
 			ctrl.value = qctrl.default_value;
 			ret = doioctl(node, VIDIOC_S_CTRL, &ctrl);
-			if (ret && ret != EIO && ret != EILSEQ)
+			if (ret && ret != EIO && ret != EILSEQ &&
+			    !(ret == EACCES && is_uvcvideo))
 				return fail("could not set default value\n");
 		}
 	}
@@ -583,6 +595,16 @@ static int checkExtendedCtrl(const struct v4l2_ext_control &ctrl, const struct t
 
 	if (ctrl.id != qctrl.id)
 		return fail("control id mismatch\n");
+
+	if (qctrl.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) {
+		fail_on_test(qctrl.nr_of_dims != 1);
+		unsigned tot_elems = qctrl.dims[0];
+		fail_on_test(qctrl.elems > tot_elems);
+		fail_on_test(!qctrl.elems);
+	}
+	if (qctrl.nr_of_dims)
+		return 0;
+
 	switch (qctrl.type) {
 	case V4L2_CTRL_TYPE_INTEGER:
 	case V4L2_CTRL_TYPE_INTEGER64:
@@ -618,6 +640,208 @@ static int checkExtendedCtrl(const struct v4l2_ext_control &ctrl, const struct t
 		break;
 	}
 	return 0;
+}
+
+static int checkVividDynArray(struct node *node,
+			      struct v4l2_ext_control &ctrl,
+			      const struct test_query_ext_ctrl &qctrl)
+{
+	struct v4l2_query_ext_ctrl qextctrl = {};
+	unsigned max_elems = qctrl.dims[0];
+	unsigned max_size = qctrl.elem_size * max_elems;
+
+	delete [] ctrl.string;
+	// Allocate a buffer that's one element more than the max
+	ctrl.string = new char[max_size + qctrl.elem_size];
+	ctrl.size = qctrl.elem_size;
+	ctrl.p_u32[0] = (qctrl.minimum + qctrl.maximum) / 2;
+	// Set the last element + 1, must never be overwritten
+	ctrl.p_u32[max_elems] = 0xdeadbeef;
+
+	struct v4l2_ext_controls ctrls = {};
+	ctrls.count = 1;
+	ctrls.controls = &ctrl;
+	// Set the array to a single element
+	fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+
+	qextctrl.id = ctrl.id;
+	// Check that only one element is reported
+	fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &qextctrl));
+	fail_on_test(qextctrl.elems != 1);
+
+	// If the size is less than elem_size, the ioctl must return -EFAULT
+	ctrl.size = 0;
+	fail_on_test(doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls) != EFAULT);
+	ctrl.size = qctrl.elem_size - 1;
+	fail_on_test(doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls) != EFAULT);
+	ctrl.size = max_size + qctrl.elem_size;
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+	// Check that ctrl.size is reset to the current size of the array (1 element)
+	fail_on_test(ctrl.size != qctrl.elem_size);
+	ctrl.size = max_size + qctrl.elem_size;
+	// Attempting to set more than max_elems must result in -ENOSPC
+	fail_on_test(doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls) != ENOSPC);
+	fail_on_test(ctrl.size != max_size);
+	ctrl.size = max_size + qctrl.elem_size;
+	fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls) != ENOSPC);
+	fail_on_test(ctrl.size != max_size);
+	fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &qextctrl));
+	// Verify that the number of elements is still 1
+	fail_on_test(qextctrl.elems != 1);
+
+	ctrl.size = max_size;
+	for (unsigned i = 0; i < max_elems; i++)
+		ctrl.p_u32[i] = i;
+	// Try the max number of elements
+	fail_on_test(doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls));
+	// Check that the values are clamped
+	for (unsigned i = 0; i < max_elems; i++) {
+		unsigned j = i;
+		if (j < qctrl.minimum)
+			j = qctrl.minimum;
+		else if (j > qctrl.maximum)
+			j = qctrl.maximum;
+		fail_on_test(ctrl.p_u32[i] != j);
+	}
+	fail_on_test(ctrl.size != max_size);
+	fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &qextctrl));
+	// Verify that the number of elements is still 1
+	fail_on_test(qextctrl.elems != 1);
+	memset(ctrl.string, 0xff, max_size);
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+	// Check that there is still just one element returned.
+	fail_on_test(ctrl.size != qctrl.elem_size);
+	fail_on_test(ctrl.p_u32[0] != (qctrl.minimum + qctrl.maximum) / 2);
+
+	ctrl.size = max_size;
+	for (unsigned i = 0; i < max_elems; i++)
+		ctrl.p_u32[i] = i;
+	// Set the max number of elements
+	fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+	for (unsigned i = 0; i < max_elems; i++) {
+		unsigned j = i;
+		if (j < qctrl.minimum)
+			j = qctrl.minimum;
+		else if (j > qctrl.maximum)
+			j = qctrl.maximum;
+		fail_on_test(ctrl.p_u32[i] != j);
+	}
+	fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &qextctrl));
+	// Check that it is updated
+	fail_on_test(qextctrl.elems != max_elems);
+	memset(ctrl.string, 0xff, max_size);
+	ctrl.size = qctrl.elem_size;
+	// Check that ENOSPC is returned if the size is too small
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls) != ENOSPC);
+	// And updated to the actual required size
+	fail_on_test(ctrl.size != max_size);
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+	for (unsigned i = 0; i < max_elems; i++) {
+		unsigned j = i;
+		if (j < qctrl.minimum)
+			j = qctrl.minimum;
+		else if (j > qctrl.maximum)
+			j = qctrl.maximum;
+		fail_on_test(ctrl.p_u32[i] != j);
+	}
+	// Check that the end of the buffer isn't overwritten
+	fail_on_test(ctrl.p_u32[max_elems] != 0xdeadbeef);
+
+	ctrl.size = qctrl.elem_size;
+	ctrls.which = V4L2_CTRL_WHICH_DEF_VAL;
+	// Check that ENOSPC is returned if the size is too small
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls) != ENOSPC);
+	// And updated to the actual required size
+	fail_on_test(ctrl.size != max_size);
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+	for (unsigned i = 0; i < max_elems; i++)
+		fail_on_test(ctrl.p_u32[i] != 50);
+	// Check that the end of the buffer isn't overwritten
+	fail_on_test(ctrl.p_u32[max_elems] != 0xdeadbeef);
+
+	ctrls.which = 0;
+	ctrl.size = qctrl.elem_size;
+	ctrl.p_u32[0] = (qctrl.minimum + qctrl.maximum) / 2;
+	// Back to just one element
+	fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+	fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &qextctrl));
+	// Check this.
+	fail_on_test(qextctrl.elems != 1);
+
+	ctrl.size = max_size;
+	ctrls.which = V4L2_CTRL_WHICH_DEF_VAL;
+	memset(ctrl.string, 0xff, max_size);
+	// And updated to the actual required size
+	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+	fail_on_test(ctrl.size != qctrl.elem_size);
+	fail_on_test(ctrl.p_u32[0] != 50);
+	fail_on_test(ctrl.p_u32[1] != 0xffffffff);
+
+	return 0;
+}
+
+static int checkVividControls(struct node *node,
+			      struct v4l2_ext_control &ctrl,
+			      struct v4l2_ext_controls &ctrls,
+			      const struct test_query_ext_ctrl &qctrl)
+{
+	int ret;
+
+	switch (ctrl.id) {
+	case VIVID_CID_INTEGER64:
+		ctrl.value64 = qctrl.minimum;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set minimum value\n");
+		ctrl.value64 = qctrl.maximum;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set maximum value\n");
+		ctrl.value64 = qctrl.default_value;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set default value\n");
+		return 0;
+
+	case VIVID_CID_STRING:
+		delete [] ctrl.string;
+		ctrl.string = new char[qctrl.maximum + 1];
+		memset(ctrl.string, 'A', qctrl.minimum);
+		ctrl.string[qctrl.minimum] = '\0';
+		ctrl.size = 3;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set minimum string value\n");
+		memset(ctrl.string, 'Z', qctrl.maximum);
+		ctrl.string[qctrl.maximum] = '\0';
+		ctrl.size = 5;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set maximum string value\n");
+		memset(ctrl.string, ' ', qctrl.minimum);
+		ctrl.string[qctrl.minimum] = '\0';
+		ctrl.size = 3;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set default string value\n");
+		return 0;
+
+	case VIVID_CID_AREA:
+		ctrl.p_area->width = 200;
+		ctrl.p_area->height = 100;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set area value\n");
+		ctrl.p_area->width = 1000;
+		ctrl.p_area->height = 2000;
+		ret = doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls);
+		if (ret)
+			return fail("could not set area value\n");
+		return 0;
+
+	default:
+		return fail("should not happen\n");
+	}
 }
 
 int testExtendedControls(struct node *node)
@@ -731,6 +955,8 @@ int testExtendedControls(struct node *node)
 			} else if (ret == EILSEQ) {
 				warn("s_ext_ctrls returned EILSEQ\n");
 				ret = 0;
+			} else if (ret == EACCES && is_uvcvideo) {
+				ret = 0;
 			}
 			if (ret)
 				return fail("s_ext_ctrls returned an error (%d)\n", ret);
@@ -739,6 +965,14 @@ int testExtendedControls(struct node *node)
 				return fail("s_ext_ctrls returned invalid control contents (%08x)\n", qctrl.id);
 		}
 
+		if (is_vivid && (ctrl.id == VIVID_CID_INTEGER64 ||
+				 ctrl.id == VIVID_CID_STRING ||
+				 ctrl.id == VIVID_CID_AREA) &&
+		    checkVividControls(node, ctrl, ctrls, qctrl))
+			return fail("vivid control tests failed\n");
+		if (is_vivid && ctrl.id == VIVID_CID_U32_DYN_ARRAY &&
+		    checkVividDynArray(node, ctrl, qctrl))
+			return fail("dynamic array tests failed\n");
 		if (qctrl.flags & V4L2_CTRL_FLAG_HAS_PAYLOAD)
 			delete [] ctrl.string;
 		ctrl.string = nullptr;
@@ -807,6 +1041,8 @@ int testExtendedControls(struct node *node)
 	} else if (ret == EILSEQ) {
 		warn("s_ext_ctrls returned EILSEQ\n");
 		ret = 0;
+	} else if (ret == EACCES && is_uvcvideo) {
+		ret = 0;
 	}
 	if (ret)
 		return fail("could not set all controls\n");
@@ -837,7 +1073,7 @@ int testExtendedControls(struct node *node)
 		warn("s_ext_ctrls returned EILSEQ\n");
 		ret = 0;
 	}
-	if (ret && !multiple_classes)
+	if (ret && !(ret == EACCES && is_uvcvideo) && !multiple_classes)
 		return fail("could not set all controls of a specific class\n");
 	if (ret != EINVAL && multiple_classes)
 		return fail("should get EINVAL when setting mixed-class controls\n");

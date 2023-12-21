@@ -20,9 +20,6 @@
 #define _LARGEFILE_SOURCE 1
 #define _LARGEFILE64_SOURCE 1
 
-#include <config.h>
-
-
 #ifdef HAVE_BACKTRACE
 #include <execinfo.h>
 #endif
@@ -228,11 +225,11 @@ static ssize_t prepare_data(struct dvb_v5_fe_parms_priv *parms,
 }
 
 static struct queued_msg *send_fmt(struct dvb_device_priv *dvb, int fd,
-				   const char cmd[CMD_SIZE], const char *fmt, ...)
+				   const char *cmd, const char *fmt, ...)
 	__attribute__ (( format( printf, 4, 5 )));
 
 static struct queued_msg *send_fmt(struct dvb_device_priv *dvb, int fd,
-				   const char cmd[CMD_SIZE], const char *fmt, ...)
+				   const char *cmd, const char *fmt, ...)
 {
 	struct dvb_v5_fe_parms_priv *parms = (void *)dvb->d.fe_parms;
 	struct dvb_dev_remote_priv *priv = dvb->priv;
@@ -1497,6 +1494,7 @@ int dvb_remote_fe_set_parms(struct dvb_v5_fe_parms *par)
 	struct queued_msg *msg = NULL;
 	int ret, i;
 	char buf[REMOTE_BUF_SIZE], lnb_name[80] = "", *p = buf;
+	char cmd[CMD_SIZE];
 	size_t size = sizeof(buf);
 
 	if (priv->disconnected)
@@ -1536,7 +1534,8 @@ int dvb_remote_fe_set_parms(struct dvb_v5_fe_parms *par)
 		size -= ret;
 	}
 
-	msg = send_buf(dvb, priv->fd, "fe_set_parms", buf, p - buf);
+	strcpy(cmd, "fe_set_parms");
+	msg = send_buf(dvb, priv->fd, cmd, buf, p - buf);
 	if (!msg)
 		goto error;
 

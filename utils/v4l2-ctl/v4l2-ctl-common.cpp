@@ -390,6 +390,9 @@ static bool fill_subset(const struct v4l2_query_ext_ctrl &qc, ctrl_subset &subse
 		subset.size[d] = qc.dims[d];
 	}
 
+	if (qc.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY)
+		subset.size[0] = qc.elems;
+
 	std::string s = name2var(qc.name);
 
 	if (ctrl_subsets.find(s) != ctrl_subsets.end()) {
@@ -469,6 +472,26 @@ static void print_array(const v4l2_query_ext_ctrl &qc, const v4l2_ext_control &c
 			}
 			printf("\n");
 			break;
+		case V4L2_CTRL_TYPE_INTEGER:
+			for (i = from; i <= to; i++) {
+				printf("%10i", ctrl.p_s32[idx + i]);
+				if (i < to)
+					printf(", ");
+			}
+			printf("\n");
+			break;
+		case V4L2_CTRL_TYPE_INTEGER64:
+			for (i = from; i <= to; i++) {
+				printf("%12lli", ctrl.p_s64[idx + i]);
+				if (i < to)
+					printf(", ");
+			}
+			printf("\n");
+			break;
+		default:
+			fprintf(stderr, "%s: unsupported array type\n",
+					qc.name);
+			break;
 		}
 	}
 }
@@ -489,6 +512,8 @@ static void print_value(int fd, const v4l2_query_ext_ctrl &qc, const v4l2_ext_co
 			memset(&subset, 0, sizeof(subset));
 			for (unsigned i = 0; i < qc.nr_of_dims; i++)
 				subset.size[i] = qc.dims[i];
+			if (qc.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY)
+				subset.size[0] = qc.elems;
 		}
 		print_array(qc, ctrl, subset);
 		return;
@@ -623,8 +648,26 @@ static void print_qctrl(int fd, const v4l2_query_ext_ctrl &qc,
 	case V4L2_CTRL_TYPE_H264_PRED_WEIGHTS:
 		printf("%31s %#8.8x (h264-pred-weights):", s.c_str(), qc.id);
 		break;
+	case V4L2_CTRL_TYPE_HEVC_SPS:
+		printf("%31s %#8.8x (hevc-sps):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_HEVC_PPS:
+		printf("%31s %#8.8x (hevc-sps):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_HEVC_SLICE_PARAMS:
+		printf("%31s %#8.8x (hevc-slice-params):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_HEVC_SCALING_MATRIX:
+		printf("%31s %#8.8x (hevc-scaling-matrix):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_HEVC_DECODE_PARAMS:
+		printf("%31s %#8.8x (hevc-decode-params):", s.c_str(), qc.id);
+		break;
 	case V4L2_CTRL_TYPE_VP8_FRAME:
 		printf("%31s %#8.8x (vp8-frame):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_VP9_FRAME:
+		printf("%31s %#8.8x (vp9-frame):", s.c_str(), qc.id);
 		break;
 	case V4L2_CTRL_TYPE_MPEG2_QUANTISATION:
 		printf("%31s %#8.8x (mpeg2-quantisation):", s.c_str(), qc.id);
@@ -638,6 +681,18 @@ static void print_qctrl(int fd, const v4l2_query_ext_ctrl &qc,
 	case V4L2_CTRL_TYPE_FWHT_PARAMS:
 		printf("%31s %#8.8x (fwht-params):", s.c_str(), qc.id);
 		break;
+	case V4L2_CTRL_TYPE_AV1_SEQUENCE:
+		printf("%31s %#8.8x (av1-sequence):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_AV1_TILE_GROUP_ENTRY:
+		printf("%31s %#8.8x (av1-tile-group-entry):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_AV1_FRAME:
+		printf("%31s %#8.8x (av1-frame):", s.c_str(), qc.id);
+		break;
+	case V4L2_CTRL_TYPE_AV1_FILM_GRAIN:
+		printf("%31s %#8.8x (av1-film-grain):", s.c_str(), qc.id);
+		break;
 	default:
 		printf("%31s %#8.8x (unknown): type=%x",
 				s.c_str(), qc.id, qc.type);
@@ -647,6 +702,8 @@ static void print_qctrl(int fd, const v4l2_query_ext_ctrl &qc,
 		printf(" value=");
 		print_value(fd, qc, ctrl, false, false);
 	} else {
+		if (qc.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY)
+			printf(" elems=%u", qc.elems);
 		printf(" dims=");
 		for (i = 0; i < qc.nr_of_dims; i++)
 			printf("[%u]", qc.dims[i]);
@@ -698,6 +755,7 @@ static int print_control(int fd, struct v4l2_query_ext_ctrl &qctrl, bool show_me
 	ctrls.controls = &ext_ctrl;
 	if (qctrl.type == V4L2_CTRL_TYPE_INTEGER64 ||
 	    qctrl.type == V4L2_CTRL_TYPE_STRING ||
+	    qctrl.nr_of_dims ||
 	    qctrl.type >= V4L2_CTRL_COMPOUND_TYPES ||
 	    (V4L2_CTRL_ID2WHICH(qctrl.id) != V4L2_CTRL_CLASS_USER &&
 	     qctrl.id < V4L2_CID_PRIVATE_BASE)) {
@@ -877,7 +935,7 @@ void common_process_controls(cv4l_fd &fd)
 	}
 }
 
-void common_control_event(const struct v4l2_event *ev)
+void common_control_event(int fd, const struct v4l2_event *ev)
 {
 	const struct v4l2_event_ctrl *ctrl;
 
@@ -900,6 +958,18 @@ void common_control_event(const struct v4l2_event *ev)
 		else
 			printf("\trange: min=%d max=%d step=%d default=%d\n",
 				ctrl->minimum, ctrl->maximum, ctrl->step, ctrl->default_value);
+	}
+	if (ctrl->changes & V4L2_EVENT_CTRL_CH_DIMENSIONS) {
+		v4l2_query_ext_ctrl qctrl = {};
+	
+		qctrl.id = ev->id;
+		if (!query_ext_ctrl_ioctl(fd, qctrl)) {
+			ctrl_str2q[name2var(qctrl.name)] = qctrl;
+			printf("\tdimensions: ");
+			for (unsigned i = 0; i < qctrl.nr_of_dims; i++)
+				printf("[%u]", qctrl.dims[i]);
+			printf("\n");
+		}
 	}
 }
 
@@ -959,7 +1029,7 @@ static bool parse_next_subopt(char **subs, char **value)
 	static char *const subopts[] = {
 	    nullptr
 	};
-	int opt = getsubopt(subs, subopts, value);
+	int opt = v4l_getsubopt(subs, subopts, value);
 
 	if (opt < 0 || *value)
 		return false;
@@ -1111,6 +1181,18 @@ void common_set(cv4l_fd &_fd)
 						if (idx_in_subset(qc, subset, divide, i))
 							ctrl.p_u32[i] = v;
 					break;
+				case V4L2_CTRL_TYPE_INTEGER:
+					v = strtol(set_ctrl.second.c_str(), nullptr, 0);
+					for (i = 0; i < qc.elems; i++)
+						if (idx_in_subset(qc, subset, divide, i))
+							ctrl.p_s32[i] = v;
+					break;
+				case V4L2_CTRL_TYPE_INTEGER64:
+					v = strtol(set_ctrl.second.c_str(), nullptr, 0);
+					for (i = 0; i < qc.elems; i++)
+						if (idx_in_subset(qc, subset, divide, i))
+							ctrl.p_s64[i] = v;
+					break;
 				case V4L2_CTRL_TYPE_STRING:
 					strncpy(ctrl.string, set_ctrl.second.c_str(), qc.maximum);
 					ctrl.string[qc.maximum] = 0;
@@ -1228,7 +1310,7 @@ void common_get(cv4l_fd &_fd)
 
 					if (qc.nr_of_dims) {
 						print_value(fd, qc, ctrl, true, true);
-						return;
+						continue;
 					}
 
 					printf("%s: ", name.c_str());

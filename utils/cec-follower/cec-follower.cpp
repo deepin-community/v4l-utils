@@ -25,6 +25,7 @@ enum Option {
 	OptSetAdapter = 'a',
 	OptSetDevice = 'd',
 	OptSetDriver = 'D',
+	OptExclusive = 'e',
 	OptHelp = 'h',
 	OptIgnore = 'i',
 	OptNoWarnings = 'n',
@@ -36,6 +37,8 @@ enum Option {
 	OptServiceByDigID = 128,
 	OptStandby,
 	OptTogglePowerStatus,
+	OptIgnoreStandby,
+	OptIgnoreViewOn,
 	OptVersion,
 	OptLast = 256
 };
@@ -53,6 +56,7 @@ static struct option long_options[] = {
 	{ "device", required_argument, nullptr, OptSetDevice },
 	{ "adapter", required_argument, nullptr, OptSetAdapter },
 	{ "driver", required_argument, nullptr, OptSetDriver },
+	{ "exclusive", no_argument, 0, OptExclusive },
 	{ "help", no_argument, nullptr, OptHelp },
 	{ "no-warnings", no_argument, nullptr, OptNoWarnings },
 	{ "trace", no_argument, nullptr, OptTrace },
@@ -63,6 +67,8 @@ static struct option long_options[] = {
 	{ "service-by-dig-id", no_argument, nullptr, OptServiceByDigID },
 	{ "standby", no_argument, nullptr, OptStandby },
 	{ "toggle-power-status", required_argument, nullptr, OptTogglePowerStatus },
+	{ "ignore-standby", required_argument, nullptr, OptIgnoreStandby },
+	{ "ignore-view-on", required_argument, nullptr, OptIgnoreViewOn },
 	{ "ignore", required_argument, nullptr, OptIgnore },
 	{ "version", no_argument, nullptr, OptVersion },
 
@@ -84,12 +90,17 @@ static void usage()
 	       "  -T, --trace         Trace all called ioctls\n"
 	       "  -v, --verbose       Turn on verbose reporting\n"
 	       "  -w, --wall-clock    Show timestamps as wall-clock time (implies -v)\n"
+	       "  -e, --exclusive     If specified, then the follower uses exclusive mode (CEC_MODE_EXCL_FOLLOWER)\n"
 	       "  -m, --show-msgs     Show received messages\n"
 	       "  -s, --show-state    Show state changes from the emulated device\n"
 	       "  --service-by-dig-id Report digital services by digital ID instead of by channel\n"
 	       "  --standby           Start in Standby state\n"
 	       "  --toggle-power-status <secs>\n"
 	       "                      Toggle the power status every <secs> seconds\n"
+	       "  --ignore-standby <n>\n"
+	       "                      Ignore every <n>th received Standby message\n"
+	       "  --ignore-view-on <n>\n"
+	       "                      Ignore every <n>th received Image/Text View On message\n"
 	       "  -i, --ignore <la>,<opcode>\n"
 	       "                      Ignore messages from logical address <la> and opcode\n"
 	       "                      <opcode>. 'all' can be used for <la> or <opcode> to match\n"
@@ -459,6 +470,12 @@ int main(int argc, char **argv)
 		case OptTogglePowerStatus:
 			toggle_power_status = strtoul(optarg, nullptr, 0);
 			break;
+		case OptIgnoreStandby:
+			node.ignore_standby = strtoul(optarg, nullptr, 0);
+			break;
+		case OptIgnoreViewOn:
+			node.ignore_view_on = strtoul(optarg, nullptr, 0);
+			break;
 		case OptIgnore: {
 			bool all_la = !strncmp(optarg, "all", 3);
 			bool all_opcodes = true;
@@ -605,5 +622,5 @@ int main(int argc, char **argv)
 		std::exit(EXIT_FAILURE);
 	}
 
-	testProcessing(&node, options[OptWallClock]);
+	testProcessing(&node, options[OptExclusive], options[OptWallClock]);
 }

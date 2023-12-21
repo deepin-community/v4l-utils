@@ -22,8 +22,6 @@
 #ifndef __OPTIONS_H
 #define __OPTIONS_H
 
-#include <config.h>
-
 struct media_options
 {
 	const char *devname;
@@ -38,6 +36,7 @@ struct media_options
 	const char *fmt_pad;
 	const char *get_dv_pad;
 	const char *dv_pad;
+	const char *routes;
 };
 
 extern struct media_options media_opts;

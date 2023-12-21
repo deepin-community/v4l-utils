@@ -1,14 +1,10 @@
 #ifndef _V4L2_CTL_H
 #define _V4L2_CTL_H
 
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
-
+#include <cstdint>
 #include <linux/videodev2.h>
 #include <linux/v4l2-subdev.h>
+#include <v4l-getsubopt.h>
 
 #include <v4l2-info.h>
 
@@ -196,6 +192,8 @@ enum Option {
 	OptInfoEdid,
 	OptShowEdid,
 	OptFixEdidChecksums,
+	OptGetRouting,
+	OptSetRouting,
 	OptFreqSeek,
 	OptEncoderCmd,
 	OptTryEncoderCmd,
@@ -332,6 +330,18 @@ static inline bool subscribe_event(cv4l_fd &fd, __u32 type)
 
 #define doioctl(n, r, p) doioctl_name(n, r, p, #r)
 
+#define info(fmt, args...) 			\
+	do {					\
+		if (!options[OptSilent])	\
+			printf(fmt, ##args);	\
+	} while (0)
+
+#define stderr_info(fmt, args...) 			\
+	do {						\
+		if (!options[OptSilent])		\
+			fprintf(stderr, fmt, ##args);	\
+	} while (0)
+
 // v4l2-ctl-common.cpp
 void common_usage(void);
 void common_cmd(const std::string &media_bus_info, int ch, char *optarg);
@@ -339,7 +349,7 @@ void common_set(cv4l_fd &fd);
 void common_get(cv4l_fd &fd);
 void common_list(cv4l_fd &fd);
 void common_process_controls(cv4l_fd &fd);
-void common_control_event(const struct v4l2_event *ev);
+void common_control_event(int fd, const struct v4l2_event *ev);
 int common_find_ctrl_id(const char *name);
 
 // v4l2-ctl-tuner.cpp

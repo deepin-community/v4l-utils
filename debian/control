@@ -2,28 +2,30 @@ Source: v4l-utils
 Section: video
 Priority: optional
 Maintainer: Gregor Jasny <gjasny@googlemail.com>
-Uploaders: Loic Minier <lool@dooz.org>
 Build-Depends: debhelper-compat (= 13),
                clang:native [amd64 arm64 armel armhf i386 mips mips64el mipsel ppc64el s390x powerpc powerpcspe riscv64 ppc64 sparc64],
                doxygen,
                gettext,
                graphviz,
                libasound2-dev,
-	       libbpf-dev [linux-any],
+               libbpf-dev [linux-any],
                libelf-dev,
                libqt5opengl5-dev,
                libtool,
                libjpeg-dev,
+               meson,
+               ninja-build,
                qtbase5-dev,
                libudev-dev [linux-any],
                libx11-dev,
                pkg-config,
-	       systemd [linux-any],
+               systemd [linux-any],
+               systemd-dev [linux-any],
                udev [linux-any]
-Standards-Version: 4.6.0
+Standards-Version: 4.6.2
 Vcs-Browser: https://salsa.debian.org/debian/libv4l
 Vcs-Git: https://salsa.debian.org/debian/libv4l.git
-Homepage: https://linuxtv.org/downloads/v4l-utils/
+Homepage: https://linuxtv.org/wiki/index.php/V4l-utils
 
 Package: libv4l-0
 Section: libs
@@ -55,8 +57,6 @@ Architecture: linux-any kfreebsd-any
 Depends: ${shlibs:Depends},
          ${misc:Depends}
 Pre-Depends: ${misc:Pre-Depends}
-Breaks: libv4l-0 (<< 0.8.5-4)
-Replaces: libv4l-0 (<< 0.8.5-4)
 Multi-Arch: same
 Description: Video4linux frame format conversion library
  libv4lconvert offers functions to convert from any (known) pixelformat
@@ -84,9 +84,10 @@ Architecture: linux-any kfreebsd-any
 Depends: libv4l-0 (= ${binary:Version}),
          libv4lconvert0 (= ${binary:Version}),
          libv4l2rds0 (= ${binary:Version}),
+         libjpeg-dev,
          ${shlibs:Depends},
          ${misc:Depends}
-Suggests: pkg-config (>= 0.18)
+Suggests: pkg-config
 Multi-Arch: same
 Description: Collection of video4linux support libraries (development files)
  libv4l is a collection of libraries which adds a thin abstraction layer on
@@ -143,9 +144,10 @@ Package: libdvbv5-dev
 Section: libdevel
 Architecture: linux-any
 Depends: libdvbv5-0 (= ${binary:Version}),
+         libudev-dev,
          ${shlibs:Depends},
          ${misc:Depends}
-Suggests: pkg-config (>= 0.18), libdvbv5-doc
+Suggests: pkg-config, libdvbv5-doc
 Multi-Arch: same
 Description: Development files for libdvbv5
  This library provides functions to work with DVB devices that
@@ -199,6 +201,17 @@ Depends: libv4l-0 (= ${binary:Version}),
 Description: Test bench application for video4linux devices
  Qt v4l2 control panel application. You can change all through the v4l2
  interface exposed device controls.
+
+Package: qvidcap
+Section: utils
+Architecture: linux-any
+Depends: libv4l-0 (= ${binary:Version}),
+         ${shlibs:Depends},
+         ${misc:Depends}
+Description: Capture test utility for video4linux devices
+ The qvidcap tool is used to test video4linux capture devices,
+ either using a video device, a file, or over network.
+ This application can also serve as a generic video/TV viewer application.
 
 Package: ir-keytable
 Section: utils

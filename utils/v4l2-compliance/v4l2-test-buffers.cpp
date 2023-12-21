@@ -761,6 +761,37 @@ int testReqBufs(struct node *node)
 	return 0;
 }
 
+int testCreateBufsMax(struct node *node)
+{
+	unsigned int i;
+	int ret;
+
+	node->reopen();
+
+	cv4l_queue q(0, 0);
+
+	for (i = 1; i <= V4L2_BUF_TYPE_LAST; i++) {
+		if (!(node->valid_buftypes & (1 << i)))
+			continue;
+
+		q.init(i, V4L2_MEMORY_MMAP);
+		ret = q.create_bufs(node, 0);
+		if (!ret && (q.g_capabilities() & V4L2_BUF_CAP_SUPPORTS_MAX_NUM_BUFFERS)) {
+			fail_on_test(q.create_bufs(node, q.g_max_num_buffers()));
+			/* Some drivers may not have allocated all the requested buffers
+			 * because of memory limitation, that is OK but make the next test
+			 * failed so skip it
+			 */
+			if (q.g_max_num_buffers() != q.g_buffers())
+				continue;
+			ret = q.create_bufs(node, 1);
+			fail_on_test(ret != ENOBUFS);
+		}
+	}
+
+	return 0;
+}
+
 int testExpBuf(struct node *node)
 {
 	bool have_expbuf = false;
@@ -990,7 +1021,8 @@ static int captureBufs(struct node *node, struct node *node_m2m_cap, const cv4l_
 			fail_on_test(ret == 0);
 			fail_on_test(ret < 0);
 			fail_on_test(!FD_ISSET(node->g_fd(), &rfds) &&
-				     !FD_ISSET(node->g_fd(), &wfds));
+				     !FD_ISSET(node->g_fd(), &wfds) &&
+				     !FD_ISSET(node->g_fd(), &efds));
 			can_read = FD_ISSET(node->g_fd(), &rfds);
 			have_event = FD_ISSET(node->g_fd(), &efds);
 		} else if (pollmode == POLL_MODE_EPOLL) {
@@ -1745,9 +1777,19 @@ int testUserPtr(struct node *node, struct node *node_m2m_cap, unsigned frame_cou
 
 		if (node->is_m2m) {
 			if (node->codec_mask & STATEFUL_DECODER) {
+				int fd_flags = fcntl(node->g_fd(), F_GETFL);
+				struct timeval tv = { 1, 0 };
+				fd_set efds;
 				v4l2_event ev;
 
+				fcntl(node->g_fd(), F_SETFL, fd_flags | O_NONBLOCK);
+				FD_ZERO(&efds);
+				FD_SET(node->g_fd(), &efds);
+				ret = select(node->g_fd() + 1, nullptr, nullptr, &efds, &tv);
+				fail_on_test_val(ret < 0, ret);
+				fail_on_test(ret == 0);
 				fail_on_test(node->dqevent(ev));
+				fcntl(node->g_fd(), F_SETFL, fd_flags);
 				fail_on_test(ev.type != V4L2_EVENT_SOURCE_CHANGE);
 				fail_on_test(!(ev.u.src_change.changes & V4L2_EVENT_SRC_CH_RESOLUTION));
 			}
@@ -1820,7 +1862,9 @@ static int setupDmaBuf(struct node *expbuf_node, struct node *node,
 		fail_on_test(buf.check(q, Unqueued, i));
 		fail_on_test(exp_q.g_num_planes() < buf.g_num_planes());
 		for (unsigned p = 0; p < buf.g_num_planes(); p++) {
-			fail_on_test(exp_q.g_length(p) < buf.g_length(p));
+			if (exp_q.g_length(p) < buf.g_length(p))
+				return fail("exp_q.g_length(%u) < buf.g_length(%u): %u < %u\n",
+					    p, p, exp_q.g_length(p), buf.g_length(p));
 			// This should not work!
 			fail_on_test(node->mmap(buf.g_length(p), 0) != MAP_FAILED);
 			q.s_fd(i, p, exp_q.g_fd(i, p));
@@ -1946,9 +1990,19 @@ int testDmaBuf(struct node *expbuf_node, struct node *node, struct node *node_m2
 
 		if (node->is_m2m) {
 			if (node->codec_mask & STATEFUL_DECODER) {
+				int fd_flags = fcntl(node->g_fd(), F_GETFL);
+				struct timeval tv = { 1, 0 };
+				fd_set efds;
 				v4l2_event ev;
 
+				fcntl(node->g_fd(), F_SETFL, fd_flags | O_NONBLOCK);
+				FD_ZERO(&efds);
+				FD_SET(node->g_fd(), &efds);
+				ret = select(node->g_fd() + 1, nullptr, nullptr, &efds, &tv);
+				fail_on_test_val(ret < 0, ret);
+				fail_on_test(ret == 0);
 				fail_on_test(node->dqevent(ev));
+				fcntl(node->g_fd(), F_SETFL, fd_flags);
 				fail_on_test(ev.type != V4L2_EVENT_SOURCE_CHANGE);
 				fail_on_test(!(ev.u.src_change.changes & V4L2_EVENT_SRC_CH_RESOLUTION));
 			}
@@ -2004,6 +2058,29 @@ int testRequests(struct node *node, bool test_streaming)
 		.id = VIVID_CID_RO_INTEGER,
 	};
 	v4l2_ext_controls vivid_ro_ctrls = {};
+	// Note: the vivid dynamic array has range 10-90
+	// and the maximum number of elements is 100.
+	__u32 vivid_dyn_array[101] = {};
+	// Initialize with these values
+	static const __u32 vivid_dyn_array_init[16] = {
+		 6, 12, 18, 24, 30, 36, 42, 48,
+		54, 60, 66, 72, 78, 84, 90, 96
+	};
+	// This is the clamped version to compare against
+	static const __u32 vivid_dyn_array_clamped[16] = {
+		10, 12, 18, 24, 30, 36, 42, 48,
+		54, 60, 66, 72, 78, 84, 90, 90
+	};
+	const unsigned elem_size = sizeof(vivid_dyn_array[0]);
+	v4l2_ext_control vivid_dyn_array_ctrl = {
+		.id = VIVID_CID_U32_DYN_ARRAY,
+	};
+	v4l2_ext_controls vivid_dyn_array_ctrls = {};
+	unsigned vivid_pixel_array_size = 0;
+	v4l2_ext_control vivid_pixel_array_ctrl = {
+		.id = VIVID_CID_U8_PIXEL_ARRAY,
+	};
+	v4l2_ext_controls vivid_pixel_array_ctrls = {};
 	bool have_controls;
 	int ret;
 
@@ -2014,6 +2091,16 @@ int testRequests(struct node *node, bool test_streaming)
 	vivid_ro_ctrls.which = V4L2_CTRL_WHICH_REQUEST_VAL;
 	vivid_ro_ctrls.count = 1;
 	vivid_ro_ctrls.controls = &vivid_ro_ctrl;
+
+	if (is_vivid) {
+		v4l2_query_ext_ctrl qec = { .id = VIVID_CID_U8_PIXEL_ARRAY };
+		node->query_ext_ctrl(qec);
+		vivid_pixel_array_size = qec.elems;
+	}
+	__u8 vivid_pixel_array[vivid_pixel_array_size + 1];
+	vivid_pixel_array[vivid_pixel_array_size] = 0xff;
+	vivid_pixel_array_ctrl.size = vivid_pixel_array_size;
+	vivid_pixel_array_ctrl.p_u8 = vivid_pixel_array;
 
 	// If requests are supported, then there must be a media device
 	if (node->buf_caps & V4L2_BUF_CAP_SUPPORTS_REQUESTS)
@@ -2029,7 +2116,8 @@ int testRequests(struct node *node, bool test_streaming)
 		if (qctrl.type != V4L2_CTRL_TYPE_INTEGER &&
 		    qctrl.type != V4L2_CTRL_TYPE_BOOLEAN)
 			continue;
-		if (qctrl.flags & V4L2_CTRL_FLAG_WRITE_ONLY)
+		if (qctrl.flags & V4L2_CTRL_FLAG_WRITE_ONLY ||
+		    qctrl.flags & V4L2_CTRL_FLAG_READ_ONLY)
 			continue;
 		if (is_vivid && V4L2_CTRL_ID2WHICH(qctrl.id) == V4L2_CTRL_CLASS_VIVID)
 			continue;
@@ -2314,6 +2402,48 @@ int testRequests(struct node *node, bool test_streaming)
 		ctrls.request_fd = buf_req_fds[i];
 		if (i % 3 < 2)
 			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+		if (is_vivid) {
+			// For vivid, check modifiable array support
+			memset(vivid_pixel_array, i, vivid_pixel_array_size);
+			vivid_pixel_array_ctrls.which = V4L2_CTRL_WHICH_REQUEST_VAL;
+			vivid_pixel_array_ctrls.count = 1;
+			vivid_pixel_array_ctrls.controls = &vivid_pixel_array_ctrl;
+			vivid_pixel_array_ctrls.request_fd = buf_req_fds[i];
+			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS,
+					     &vivid_pixel_array_ctrls));
+			fail_on_test(vivid_pixel_array[vivid_pixel_array_size] != 0xff);
+
+			// For vivid, check dynamic array support:
+			vivid_dyn_array_ctrl.size = sizeof(vivid_dyn_array);
+			vivid_dyn_array_ctrl.p_u32 = vivid_dyn_array;
+			memset(vivid_dyn_array, 0xff, sizeof(vivid_dyn_array));
+			vivid_dyn_array_ctrls.which = V4L2_CTRL_WHICH_REQUEST_VAL;
+			vivid_dyn_array_ctrls.count = 1;
+			vivid_dyn_array_ctrls.controls = &vivid_dyn_array_ctrl;
+			vivid_dyn_array_ctrls.request_fd = buf_req_fds[i];
+			// vivid_dyn_array_ctrl.size is too large, must return ENOSPC
+			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS,
+					     &vivid_dyn_array_ctrls) != ENOSPC);
+			// and size is set at 100 elems
+			fail_on_test(vivid_dyn_array_ctrl.size != 100 * elem_size);
+			// Check that the array is not overwritten
+			fail_on_test(vivid_dyn_array[0] != 0xffffffff);
+			if (i % 3 < 2) {
+				unsigned size = (2 + 2 * (i % 8)) * elem_size;
+
+				// Set proper size, varies per request
+				vivid_dyn_array_ctrl.size = size;
+				memcpy(vivid_dyn_array, vivid_dyn_array_init, size);
+				fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS,
+						     &vivid_dyn_array_ctrls));
+				// check that the size is as expected
+				fail_on_test(vivid_dyn_array_ctrl.size != size);
+				// and the array values are correctly clamped
+				fail_on_test(memcmp(vivid_dyn_array, vivid_dyn_array_clamped, size));
+				// and the end of the array is not overwritten
+				fail_on_test(vivid_dyn_array[size / elem_size] != 0xffffffff);
+			}
+		}
 		// Re-init the unqueued request
 		fail_on_test(doioctl_fd(buf_req_fds[i], MEDIA_REQUEST_IOC_REINIT, nullptr));
 
@@ -2326,6 +2456,20 @@ int testRequests(struct node *node, bool test_streaming)
 		ctrls.request_fd = buf_req_fds[i];
 		if (i % 3 < 2)
 			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+		if (is_vivid && i % 3 < 2) {
+			// Set the pixel array control again
+			memset(vivid_pixel_array, i, vivid_pixel_array_size);
+			vivid_pixel_array_ctrls.request_fd = buf_req_fds[i];
+			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS,
+					     &vivid_pixel_array_ctrls));
+			// Set the dynamic array control again
+			vivid_dyn_array_ctrls.request_fd = buf_req_fds[i];
+			vivid_dyn_array_ctrl.size = (2 + 2 * (i % 8)) * elem_size;
+			memcpy(vivid_dyn_array, vivid_dyn_array_init,
+			       sizeof(vivid_dyn_array_init));
+			fail_on_test(doioctl(node, VIDIOC_S_EXT_CTRLS,
+					     &vivid_dyn_array_ctrls));
+		}
 
 		// After the re-init the buffer is no longer marked for
 		// a request. If a request has been queued before (hence
@@ -2428,8 +2572,38 @@ int testRequests(struct node *node, bool test_streaming)
 			// (sequence number & 0xff).
 			vivid_ro_ctrls.request_fd = buf_req_fds[i];
 			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_ro_ctrls));
-			if (node->is_video && !node->can_output)
-				warn_once_on_test(vivid_ro_ctrl.value != (int)i);
+			if (node->is_video && !node->can_output &&
+			    vivid_ro_ctrl.value != (int)i)
+				warn_once("vivid_ro_ctrl.value (%d) != i (%u)\n",
+					  vivid_ro_ctrl.value, i);
+
+			// Check that the dynamic control array is set as
+			// expected and with the correct values.
+			vivid_dyn_array_ctrls.request_fd = buf_req_fds[i];
+			memset(vivid_dyn_array, 0xff, sizeof(vivid_dyn_array));
+			vivid_dyn_array_ctrl.size = sizeof(vivid_dyn_array);
+			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_dyn_array_ctrls));
+			unsigned size = (2 + 2 * (i % 8)) * elem_size;
+			if (i % 3 == 2)
+				size = (2 + 2 * ((i - 1) % 8)) * elem_size;
+			fail_on_test(vivid_dyn_array_ctrl.size != size);
+			fail_on_test(memcmp(vivid_dyn_array, vivid_dyn_array_clamped,
+					    vivid_dyn_array_ctrl.size));
+			fail_on_test(vivid_dyn_array[size / elem_size] != 0xffffffff);
+			// Check that the pixel array control is set as
+			// expected and with the correct values.
+			vivid_pixel_array_ctrls.request_fd = buf_req_fds[i];
+			memset(vivid_pixel_array, 0xfe, vivid_pixel_array_size);
+			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_pixel_array_ctrls));
+			bool ok = true;
+			__u8 expected = (i % 3 == 2) ? i - 1 : i;
+			for (unsigned j = 0; j < vivid_pixel_array_size; j++)
+				if (vivid_pixel_array[j] != expected) {
+					ok = false;
+					break;
+				}
+			fail_on_test(!ok);
+			fail_on_test(vivid_pixel_array[vivid_pixel_array_size] != 0xff);
 		}
 		fail_on_test(buf.querybuf(node, i));
 		// Check that all the buffers of the stopped stream are
@@ -2473,11 +2647,40 @@ int testRequests(struct node *node, bool test_streaming)
 		fail_on_test(ctrl.value != (is_max ? valid_qctrl.maximum :
 					    valid_qctrl.minimum));
 		if (is_vivid) {
-			// For vivid check the final read-only value
+			// For vivid check the final read-only value,
 			vivid_ro_ctrls.which = 0;
 			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_ro_ctrls));
-			if (node->is_video && !node->can_output)
-				warn_on_test(vivid_ro_ctrl.value != (int)(num_bufs - 1));
+			if (node->is_video && !node->can_output &&
+			    vivid_ro_ctrl.value != (int)(num_bufs - 1))
+				warn("vivid_ro_ctrl.value (%d) != num_bufs - 1 (%d)\n",
+				     vivid_ro_ctrl.value, num_bufs - 1);
+
+			// the final dynamic array value,
+			v4l2_query_ext_ctrl q_dyn_array = {
+				.id = VIVID_CID_U32_DYN_ARRAY,
+			};
+			fail_on_test(doioctl(node, VIDIOC_QUERY_EXT_CTRL, &q_dyn_array));
+			unsigned elems = 2 + 2 * ((num_bufs - 1) % 8);
+			if ((num_bufs - 1) % 3 == 2)
+				elems = 2 + 2 * ((num_bufs - 2) % 8);
+			fail_on_test(q_dyn_array.elems != elems);
+			vivid_dyn_array_ctrls.which = 0;
+			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_dyn_array_ctrls));
+			fail_on_test(vivid_dyn_array_ctrl.size != elems * elem_size);
+			fail_on_test(memcmp(vivid_dyn_array, vivid_dyn_array_clamped,
+					    vivid_dyn_array_ctrl.size));
+
+			// and the final pixel array value.
+			vivid_pixel_array_ctrls.which = 0;
+			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_pixel_array_ctrls));
+			bool ok = true;
+			__u8 expected = (num_bufs - 1) % 3 == 2 ? num_bufs - 2 : num_bufs - 1;
+			for (unsigned j = 0; j < vivid_pixel_array_size; j++)
+				if (vivid_pixel_array[j] != expected) {
+					ok = false;
+					break;
+				}
+			fail_on_test(!ok);
 		}
 	}
 
@@ -2529,7 +2732,7 @@ public:
 		 */
 		if (!done) {
 			pthread_kill(thread, SIGUSR1);
-			usleep(100000);
+			sleep(1);
 		}
 
 		/*
@@ -2538,7 +2741,7 @@ public:
 		 */
 		if (!done) {
 			pthread_cancel(thread);
-			usleep(100000);
+			sleep(1);
 		}
 
 		pthread_join(thread, nullptr);
@@ -2633,7 +2836,7 @@ static int testBlockingDQBuf(struct node *node, cv4l_queue &q)
 	thread_dqbuf.start();
 
 	/* Wait for the child thread to start and block */
-	usleep(100000);
+	sleep(1);
 	/* Check that it is really blocking */
 	fail_on_test(thread_dqbuf.done);
 
@@ -2641,7 +2844,7 @@ static int testBlockingDQBuf(struct node *node, cv4l_queue &q)
 	thread_streamoff.start();
 
 	/* Wait for the second child to start and exit */
-	usleep(250000);
+	sleep(3);
 	fail_on_test(!thread_streamoff.done);
 
 	fail_on_test(node->streamoff(q.g_type()));

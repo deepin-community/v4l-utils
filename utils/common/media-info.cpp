@@ -3,6 +3,7 @@
  * Copyright 2018 Cisco Systems, Inc. and/or its affiliates. All rights reserved.
  */
 
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -333,6 +334,7 @@ static constexpr flag_def entity_functions_def[] = {
 	{ MEDIA_ENT_F_PROC_VIDEO_STATISTICS, "Video Statistics" },
 	{ MEDIA_ENT_F_PROC_VIDEO_DECODER, "Video Decoder" },
 	{ MEDIA_ENT_F_PROC_VIDEO_ENCODER, "Video Encoder" },
+	{ MEDIA_ENT_F_PROC_VIDEO_ISP, "Image Signal Processor" },
 	{ MEDIA_ENT_F_VID_MUX, "Video Muxer" },
 	{ MEDIA_ENT_F_VID_IF_BRIDGE, "Video Interface Bridge" },
 	{ 0, nullptr }
@@ -365,15 +367,17 @@ std::string mi_entfunction2s(__u32 function, bool *is_invalid)
 		if (function == entity_functions_def[i].flag) {
 			bool fail = !memcmp(entity_functions_def[i].str, "FAIL: ", 6);
 
-			if (is_invalid) {
+			if (is_invalid && fail) {
 				*is_invalid = fail;
 				return entity_functions_def[i].str;
 			}
 			return fail ? entity_functions_def[i].str + 6 : entity_functions_def[i].str;
 		}
 	}
-	if (is_invalid)
-		return "WARNING: Unknown Function (" + num2s(function) + "), is v4l2-compliance out-of-date?";
+	if (is_invalid) {
+		*is_invalid = true;
+		return "FAIL: Unknown Function (" + num2s(function) + "), is v4l2-compliance out-of-date?";
+	}
 	return "Unknown Function (" + num2s(function) + ")";
 }
 
@@ -422,6 +426,8 @@ std::string mi_linkflags2s(__u32 flags)
 		return "Data" + s;
 	case MEDIA_LNK_FL_INTERFACE_LINK:
 		return "Interface" + s;
+	case MEDIA_LNK_FL_ANCILLARY_LINK:
+		return "Ancillary" + s;
 	default:
 		return "Unknown (" + num2s(flags) + ")" + s;
 	}
@@ -568,7 +574,7 @@ static __u32 read_topology(int media_fd, __u32 major, __u32 minor,
 			}
 			printf("\t  Link 0x%08x: %s remote pad 0x%x of entity '%s' (%s): %s\n",
 			       link.id, is_sink ? "from" : "to", remote_pad,
-			       remote_ent->name, mi_entfunction2s(remote_ent->function).c_str(),
+			       remote_ent->name, mi_entfunction2s(remote_ent->function, is_invalid).c_str(),
 			       mi_linkflags2s(link.flags).c_str());
 			if (function && !*function)
 				*function = remote_ent->function;

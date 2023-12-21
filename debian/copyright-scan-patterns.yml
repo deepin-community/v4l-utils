@@ -1,0 +1,36 @@
+---
+check:
+  pattern:
+  - test-media
+  - gconv.map
+  - gconv-modules
+ignore:
+  pattern:
+  - /*-po/
+  - /rc_keymaps/
+  - ChangeLog
+  - COPYING.*
+  - INSTALL
+  - README*
+  - TODO.*
+  suffixes:
+  - 1
+  - 1.in
+  - 5
+  - 5.in
+  - cfg
+  - conf
+  - desktop
+  - diff
+  - doc
+  - header
+  - patch
+  - pc.in
+  - pro
+  - qrc
+  - rules
+  - sed
+  - series
+  - spec.in
+  - svg
+  - txt

@@ -11,12 +11,6 @@
 #include <linux/cec-funcs.h>
 #include "cec-htng-funcs.h"
 
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
-
 #include <cec-info.h>
 #include <cec-log.h>
 #include <set>
@@ -86,6 +80,10 @@ struct node {
 
 	bool ignore_la[16];
 	unsigned short ignore_opcode[256];
+	unsigned standby_cnt;
+	unsigned ignore_standby;
+	unsigned view_on_cnt;
+	unsigned ignore_view_on;
 };
 
 struct Timer {
@@ -198,6 +196,10 @@ struct short_audio_desc {
 #define SAD_EXT_TYPE_AC_4			12
 #define SAD_EXT_TYPE_LPCM_3D_AUDIO		13
 
+#ifndef __FILE_NAME__
+#define __FILE_NAME__ __FILE__
+#endif
+
 #define info(fmt, args...) 					\
 	do {							\
 		if (show_info)					\
@@ -214,7 +216,7 @@ struct short_audio_desc {
 	do {							\
 		warnings++;					\
 		if (show_warnings)				\
-			printf("\t\twarn: %s(%d): " fmt, __FILE__, __LINE__, ##args);	\
+			printf("\t\twarn: %s(%d): " fmt, __FILE_NAME__, __LINE__, ##args);	\
 	} while (0)
 
 #define warn_once(fmt, args...)						\
@@ -226,7 +228,7 @@ struct short_audio_desc {
 			warnings++;					\
 			if (show_warnings)				\
 				printf("\t\twarn: %s(%d): " fmt,	\
-					__FILE__, __LINE__, ##args); 	\
+					__FILE_NAME__, __LINE__, ##args); 	\
 		}							\
 	} while (0)
 
@@ -276,7 +278,7 @@ void process_timer_msgs(struct node *node, struct cec_msg &msg, unsigned me, __u
 // CEC processing
 void reply_feature_abort(struct node *node, struct cec_msg *msg,
 			 __u8 reason = CEC_OP_ABORT_UNRECOGNIZED_OP);
-void testProcessing(struct node *node, bool wallclock);
+void testProcessing(struct node *node, bool exclusive, bool wallclock);
 bool enter_standby(struct node *node);
 
 #endif

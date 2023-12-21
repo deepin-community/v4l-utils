@@ -11,6 +11,27 @@
 #include <linux/videodev2.h>
 #include <linux/v4l2-subdev.h>
 
+#define v4l2_tracer_info(fmt, args...)					\
+	do {								\
+		char msg[256];						\
+		snprintf(msg, sizeof(msg), "v4l2-tracer: " fmt, ##args);\
+		write(open("/dev/null", O_WRONLY), msg, strlen(msg));	\
+	} while (0)
+
+/*
+ * The max value comes from a check in the kernel source code
+ * drivers/media/v4l2-core/v4l2-ioctl.c check_array_args()
+ */
+#define NUM_ROUTES_MAX 256
+
+struct flag_def {
+	unsigned flag;
+	const char *str;
+};
+
+/* Return a comma-separated string of flags or hex value if unknown */
+std::string flags2s(unsigned val, const flag_def *def);
+
 /* Print capability information */
 void v4l2_info_capability(const v4l2_capability &cap);
 void v4l2_info_subdev_capability(const v4l2_subdev_capability &subdevcap);
@@ -117,5 +138,23 @@ std::string bufferflags2s(__u32 flags);
 
 /* Return vbi flags description */
 std::string vbiflags2s(__u32 flags);
+
+/* Return tuner type description */
+std::string ttype2s(int type);
+
+/* Return audio mode description */
+std::string audmode2s(int audmode);
+
+/* Return RX subchannels description */
+std::string rxsubchans2s(int rxsubchans);
+
+/* Return TX subchannels description */
+std::string txsubchans2s(int txsubchans);
+
+/* Return tuner capabilities description */
+std::string tcap2s(unsigned cap);
+
+/* Return band modulation description */
+std::string modulation2s(unsigned modulation);
 
 #endif

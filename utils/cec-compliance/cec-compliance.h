@@ -11,12 +11,6 @@
 #include <linux/cec-funcs.h>
 #include "cec-htng-funcs.h"
 
-#ifdef ANDROID
-#include <android-config.h>
-#else
-#include <config.h>
-#endif
-
 #include <cec-info.h>
 
 #include <vector>
@@ -181,6 +175,10 @@ struct remote_subtest {
 
 using vec_remote_subtests = std::vector<remote_subtest>;
 
+#ifndef __FILE_NAME__
+#define __FILE_NAME__ __FILE__
+#endif
+
 #define OK			0
 #define FAIL			1
 #define OK_PRESUMED		2
@@ -226,7 +224,7 @@ using vec_remote_subtests = std::vector<remote_subtest>;
 	if (show_warnings)						\
 		printf("\t\%s: %s(%d): " fmt,				\
 		       show_colors ? COLOR_BOLD("warn") : "warn",	\
-		       __FILE__, __LINE__, ##args);			\
+		       __FILE_NAME__, __LINE__, ##args);			\
 	if (exit_on_warn)						\
 		std::exit(EXIT_FAILURE);				\
 	0;								\
@@ -257,7 +255,7 @@ using vec_remote_subtests = std::vector<remote_subtest>;
 #define fail(fmt, args...) 						\
 ({ 									\
 	printf("\t\t%s: %s(%d): " fmt, show_colors ?			\
-	       COLOR_RED("fail") : "fail", __FILE__, __LINE__, ##args);	\
+	       COLOR_RED("fail") : "fail", __FILE_NAME__, __LINE__, ##args);	\
 	if (exit_on_fail)						\
 		std::exit(EXIT_FAILURE);				\
 	FAIL;								\
@@ -472,6 +470,7 @@ extern const vec_remote_subtests audio_rate_ctl_subtests;
 // cec-test-power.cpp
 bool util_interactive_ensure_power_state(struct node *node, unsigned me, unsigned la, bool interactive,
 					 __u8 target_pwr);
+int standby_resume_wakeup(struct node *node, unsigned me, unsigned la, bool interactive);
 extern const vec_remote_subtests standby_subtests;
 extern const vec_remote_subtests one_touch_play_subtests;
 extern const vec_remote_subtests power_status_subtests;

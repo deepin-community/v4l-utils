@@ -56,10 +56,16 @@ static inline void *vzalloc(unsigned long size)
 
 #define clamp_t(type, val, min, max) clamp((type)val, (type)min, (type)max)
 
-static inline u32 prandom_u32_max(u32 ep_ro)
+static inline u32 get_random_u32_below(u32 ep_ro)
 {
 	return rand() % ep_ro;
 }
+
+static inline u32 get_random_u8(void)
+{
+	return get_random_u32_below(256);
+}
+
 
 struct tpg_rbg_color8 {
 	unsigned char r, g, b;
@@ -256,6 +262,7 @@ struct tpg_data {
 	bool				show_square;
 	bool				insert_sav;
 	bool				insert_eav;
+	bool				insert_hdmi_video_guard_band;
 
 	/* Test pattern movement */
 	enum tpg_move_mode		mv_hor_mode;
@@ -635,6 +642,21 @@ static inline void tpg_s_insert_sav(struct tpg_data *tpg, bool insert_sav)
 static inline void tpg_s_insert_eav(struct tpg_data *tpg, bool insert_eav)
 {
 	tpg->insert_eav = insert_eav;
+}
+
+/*
+ * This inserts 4 pixels of the RGB color 0xab55ab at the left hand side of the
+ * image. This is only done for 3 or 4 byte RGB pixel formats. This pixel value
+ * equals the Video Guard Band value as defined by HDMI (see section 5.2.2.1
+ * in the HDMI 1.3 Specification) that preceeds the first actual pixel. If the
+ * HDMI receiver doesn't handle this correctly, then it might keep skipping
+ * these Video Guard Band patterns and end up with a shorter video line. So this
+ * is a nice pattern to test with.
+ */
+static inline void tpg_s_insert_hdmi_video_guard_band(struct tpg_data *tpg,
+						      bool insert_hdmi_video_guard_band)
+{
+	tpg->insert_hdmi_video_guard_band = insert_hdmi_video_guard_band;
 }
 
 void tpg_update_mv_step(struct tpg_data *tpg);

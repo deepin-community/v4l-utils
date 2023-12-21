@@ -13,7 +13,11 @@
 #include <QtCore/QTextStream>
 #include <QtCore/QCoreApplication>
 #include <QtGui/QOpenGLContext>
+#if QT_VERSION < 0x060000
 #include <QtGui/QOpenGLPaintDevice>
+#else
+#include <QOpenGLPaintDevice>
+#endif
 #include <QtGui/QContextMenuEvent>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
@@ -57,6 +61,8 @@ const __u32 formats[] = {
 	V4L2_PIX_FMT_XYUV32,
 	V4L2_PIX_FMT_VUYA32,
 	V4L2_PIX_FMT_VUYX32,
+	V4L2_PIX_FMT_YUVA32,
+	V4L2_PIX_FMT_YUVX32,
 	V4L2_PIX_FMT_RGB32,
 	V4L2_PIX_FMT_XRGB32,
 	V4L2_PIX_FMT_ARGB32,
@@ -882,6 +888,8 @@ bool CaptureWin::updateV4LFormat(const cv4l_fmt &fmt)
 	case V4L2_PIX_FMT_XYUV32:
 	case V4L2_PIX_FMT_VUYA32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVA32:
+	case V4L2_PIX_FMT_YUVX32:
 		m_is_rgb = false;
 		m_accepts_srgb = false;
 		break;

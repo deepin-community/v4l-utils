@@ -1,7 +1,7 @@
 /*
     V4L2 API format ioctl tests.
 
-    Copyright (C) 2011  Hans Verkuil <hans.verkuil@cisco.com>
+    Copyright (C) 2011  Hans Verkuil <hverkuil-cisco@xs4all.nl>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -258,7 +258,17 @@ static int testEnumFormatsType(struct node *node, unsigned type)
 
 		// Check that the driver does not overwrites the kernel pixelformat description
 		std::string descr = pixfmt2s(fmtdesc.pixelformat);
+		// In v6.2 the Y/CbCr and Y/CrCb strings were replaced by
+		// Y/UV and Y/VU. Accept both variants for now.
+		std::string descr_alt = descr;
+		size_t idx = descr_alt.find("Y/UV", 0);
+		if (idx != std::string::npos)
+			descr_alt.replace(idx, 4, "Y/CbCr");
+		idx = descr_alt.find("Y/VU", 0);
+		if (idx != std::string::npos)
+			descr_alt.replace(idx, 4, "Y/CrCb");
 		if (strcmp(descr.c_str(), (const char *)fmtdesc.description) &&
+		    strcmp(descr_alt.c_str(), (const char *)fmtdesc.description) &&
 		    memcmp(descr.c_str(), "Unknown", 7))
 			return fail("fmtdesc.description mismatch: was '%s', expected '%s'\n",
 				    fmtdesc.description, descr.c_str());
@@ -1341,8 +1351,16 @@ static int testParmType(struct node *node, unsigned type)
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		if (node->g_caps() & buftype2cap[type]) {
-			fail_on_test(ret && node->has_frmintervals);
-			fail_on_test(ret && node->has_enc_cap_frame_interval);
+			if (is_stateful_enc) {
+				if (V4L2_TYPE_IS_OUTPUT(type))
+					fail_on_test(ret && node->has_frmintervals);
+				else if (node->has_enc_cap_frame_interval)
+					fail_on_test(ret);
+				else
+					fail_on_test(!ret);
+			} else {
+				fail_on_test(ret && node->has_frmintervals);
+			}
 		}
 		break;
 	default:

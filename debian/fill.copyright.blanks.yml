@@ -1,0 +1,95 @@
+---
+
+contrib/parsers/parse_tcpdump_log.pl:
+  override-license: GPL-2 # misdetected by cme
+
+contrib/test/sdlcam.c:
+  license: LGPL
+
+contrib/test/test-media-unload.pl:
+  override-license: GPL-2 # misdetected by cme
+contrib/test/vim2m_test_with_gstreamer.sh:
+  override-license: GPL-2 # misdetected by cme
+contrib/test/vim2m_test_with_qvidcap.sh:
+  override-license: GPL-2 # misdetected by cme
+
+contrib/freebsd/include/linux/uinput.h:
+  override-license: GPL-2+ # GPL-2.0+ WITH Linux-syscall-note
+contrib/freebsd/include/linux/ivtv.h:
+  override-license: GPL-2+ # GPL-2.0+ WITH Linux-syscall-note
+
+contrib/freebsd/include/linux/input-event-codes.h:
+  override-license: GPL-2 # GPL-2.0-only WITH Linux-syscall-note
+
+contrib/freebsd/include/linux/input.h:
+  override-license: GPL-2 # GPL-2.0 WITH Linux-syscall-note
+
+contrib/freebsd/include/linux/v4l2-common.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+contrib/freebsd/include/linux/v4l2-controls.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+contrib/freebsd/include/linux/videodev2.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+
+#
+
+debian/:
+  copyright: 2008-2023, Gregor Jasny <gjasny@googlemail.com>
+  license: GPL-2+
+
+#
+
+include/linux/cec.h:
+  override-license: GPL-2 or BSD-3-clause # ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+include/linux/cec-funcs.h:
+  override-license: GPL-2 or BSD-3-clause # ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+
+include/linux/v4l2-common.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+include/linux/v4l2-controls.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+include/linux/videodev2.h:
+  override-license: GPL-2+ or BSD-3-clause # (GPL-2.0+ WITH Linux-syscall-note) or BSD-3-Clause
+
+include/linux/dvb/*:
+  override-license: LGPL-2.1+ # LGPL-2.1+ WITH Linux-syscall-note
+
+#
+
+lib/include/libdvbv5/dvb-frontend.h:
+  override-license: LGPL-2.1+ # LGPL-2.1+ WITH Linux-syscall-note
+
+lib/libv4lconvert/jpeg_memsrcdest.c:
+  license: jpeg-group
+lib/libv4lconvert/jidctflt.c:
+  license: jpeg-group
+
+lib/libv4lconvert/jpgl.c:
+  override-license: LGPL-2.1+ # relicensed
+lib/libv4lconvert/pac207.c:
+  override-license: LGPL-2.1+ # relicensed
+lib/libv4lconvert/sn9c10x.c:
+  override-license: LGPL-2.1+ # relicensed
+lib/libv4lconvert/sn9c20x.c:
+  override-license: LGPL-2.1+ # relicensed
+lib/libv4lconvert/spca561-decompress.c:
+  override-license: LGPL-2.1+ # relicensed
+
+#
+
+utils/libcecutil/:
+  license: LGPL-2.1 or BSD-3-clause
+utils/libcecutil/cec-gen.pl:
+  license: GPL-2 or BSD-3-clause # GPL-2.0-only OR BSD-3-Clause
+utils/cec-follower/*:
+  license: GPL-2 or BSD-3-clause # GPL-2.0-only OR BSD-3-Clause
+include/linux/lirc.h:
+  license: GPL-2 # GPL-2.0 WITH Linux-syscall-note
+utils/common/v4l-helpers.h:
+  license: GPL-2 or BSD-3-clause # GPL-2.0-only OR BSD-3-Clause
+utils/common/cv4l-helpers.h:
+  license: GPL-2 or BSD-3-clause # GPL-2.0-only OR BSD-3-Clause
+utils/qv4l2/vbi-tab.cpp:
+  license: GPL-2
+utils/qv4l2/vbi-tab.h:
+  license: GPL-2

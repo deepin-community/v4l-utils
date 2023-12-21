@@ -18,6 +18,7 @@ unload=0
 unbind_time=1
 reunbind_time=9
 rmmod_time=1
+modprobe_time=3
 kobj_rel=0
 v4l2_ctl=v4l2-ctl
 v4l2_compliance=v4l2-compliance
@@ -55,7 +56,8 @@ if [ -z "$1" ]; then
 	echo "vimc: test the vimc driver"
 	echo "vicodec: test the vicodec driver"
 	echo "vidtv: test the vidtv driver"
-	echo "cec: adds the vivid CEC compliance tests, 'cec-pwr' adds the CEC standby/wakeup tests."
+	echo "cec: adds the vivid CEC compliance tests, except for the CEC standby/wakeup tests."
+	echo "cec-pwr: adds the vivid CEC compliance tests, including the CEC standby/wakeup tests."
 	echo "all: equals 'vivid vim2m vimc vicodec vidtv cec cec-pwr'"
 	echo "mc: equals 'vivid vim2m vimc vicodec vidtv'"
 	exit 0
@@ -68,9 +70,7 @@ fi
 
 dmesg -n notice
 
-date
-uname -a
-v4l2-compliance --version
+echo
 echo test-media $*
 echo
 echo
@@ -111,8 +111,6 @@ while [ ! -z "$1" ]; do
 			echo v4l2-compliance-32 is not installed.
 			exit 0
 		fi
-		$v4l2_compliance --version
-		echo
 		;;
 	all)
 		vidtv=1
@@ -128,7 +126,7 @@ while [ ! -z "$1" ]; do
 		vim2m=1
 		vimc=1
 		vicodec=1
-		vidtv=0
+		vidtv=1
 		;;
 	vidtv)
 		vidtv=1
@@ -147,13 +145,22 @@ while [ ! -z "$1" ]; do
 		;;
 	cec)
 		cec=1
+		cecpwr=--skip-test-standby-resume
 		;;
 	cec-pwr)
+		cec=1
 		cecpwr=
 		;;
 	esac
 	shift
 done
+
+date
+uname -a
+echo
+$v4l2_ctl --version
+$v4l2_compliance --version
+echo
 
 if [ $vidtv -eq 1 ]; then
 	if [ ! -f /proc/config.gz ]; then
@@ -173,7 +180,8 @@ if [ $kobj_rel -eq 1 ]; then
 	echo Detected CONFIG_DEBUG_KOBJECT_RELEASE=y
 	unbind_time=10
 	reunbind_time=14
-	rmmod_time=5
+	rmmod_time=10
+	modprobe_time=10
 fi
 
 if [ $unload -eq 1 ]; then
@@ -187,7 +195,7 @@ fi
 
 rmmod vivid 2&>/dev/null
 modprobe vivid n_devs=3 multiplanar=1,2,2 cache_hints=1,0,0 #allocators=0,1,1
-sleep 1
+sleep $modprobe_time
 
 tmp=`mktemp`
 
@@ -233,6 +241,10 @@ fi
 
 if [ $cec -eq 1 ]; then
 	dmesg -n notice
+	cec-ctl --version
+	cec-compliance --version
+	cec-follower --version
+	echo
 	if ! cec-ctl -D vivid -a vivid-000-vid-cap0 >/dev/null ; then
 		echo "FAIL: the vivid module had no cec support" | tee -a $tmp
 		echo "Grand Total for vivid cec: Succeeded: 0, Failed: 1, Warnings: 0" | tee -a $tmp
@@ -314,8 +326,8 @@ if [ $vivid -eq 1 -a $setup -eq 0 ]; then
 		echo
 	fi
 
-	modprobe vivid n_devs=3 multiplanar=1,2,2 #allocators=0,1,1
-	sleep 1
+	modprobe vivid n_devs=3 multiplanar=1,2,2 cache_hints=1,0,0 #allocators=0,1,1
+	sleep $modprobe_time
 
 	$v4l2_ctl -z platform:vivid-002 -d vivid-002-vid-cap -i3 -v width=3840,height=2160,pixelformat=NV24
 	$v4l2_ctl -z platform:vivid-002 -d vivid-002-vid-out -o1 -x width=3840,height=2160,pixelformat=NM16
@@ -336,7 +348,7 @@ fi
 if [ $vim2m -eq 1 ]; then
 	rmmod vim2m 2&>/dev/null
 	modprobe vim2m
-	sleep 1
+	sleep $modprobe_time
 	dmesg -n notice
 
 	if ! $v4l2_ctl -z platform:vim2m ; then
@@ -412,7 +424,7 @@ fi
 if [ $vimc -eq 1 ]; then
 	rmmod vimc 2&>/dev/null
 	modprobe vimc
-	sleep 1
+	sleep $modprobe_time
 	dmesg -n notice
 
 	if ! $v4l2_ctl -z platform:vimc -d "Sensor A" ; then
@@ -516,7 +528,7 @@ if [ $vicodec -eq 1 ]; then
 
 	rmmod vicodec 2&>/dev/null
 	modprobe vicodec
-	sleep 2
+	sleep $modprobe_time
 	dmesg -n notice
 
 	if ! $v4l2_ctl -z platform:vicodec ; then
@@ -560,7 +572,7 @@ if [ $vicodec -eq 1 -a $setup -eq 0 ]; then
 	echo vicodec media controller compliance tests | tee /dev/kmsg
 	echo
 	date
-	stdbuf -oL $v4l2_compliance -M platform:vicodec 2>&1 | tee -a $tmp
+	stdbuf -oL $v4l2_compliance -m platform:vicodec 2>&1 | tee -a $tmp
 
 	echo
 	echo vicodec encoder compliance tests | tee /dev/kmsg
@@ -580,6 +592,9 @@ if [ $vicodec -eq 1 -a $setup -eq 0 ]; then
 
 	decful_opts='-z platform:vicodec -d stateful-decoder-source --stream-mmap --stream-out-mmap'
 	decless_opts='-z platform:vicodec -d stateless-decoder-source --stream-mmap --stream-out-mmap'
+	vicodec_tests=0
+	vicodec_ok=0
+	vicodec_fail=0
 	echo
 	echo stateful decode | tee /dev/kmsg
 	echo
@@ -588,7 +603,14 @@ if [ $vicodec -eq 1 -a $setup -eq 0 ]; then
 	echo stateless decode | tee /dev/kmsg
 	echo
 	$v4l2_ctl $decless_opts --stream-from-hdr=$tmpdir/comp.hdr.yu12.1280.24 --stream-to=$tmpdir/raw.yu12.1280.24.stateless
-	cmp $tmpdir/raw.yu12.1280.24 $tmpdir/raw.yu12.1280.24.stateless
+	vicodec_tests=$((vicodec_tests+1))
+	if cmp $tmpdir/raw.yu12.1280.24 $tmpdir/raw.yu12.1280.24.stateless ; then
+		echo "OK: stateless decode" | tee -a $tmp
+		vicodec_ok=$((vicodec_ok+1))
+	else
+		echo "FAIL: stateless decode: unexpected output" | tee -a $tmp
+		vicodec_fail=$((vicodec_fail+1))
+	fi
 
 	echo
 	echo stateful decode with dynamic resolution changes for every frame | tee /dev/kmsg
@@ -596,7 +618,14 @@ if [ $vicodec -eq 1 -a $setup -eq 0 ]; then
 	$v4l2_ctl $decful_opts --stream-from-hdr=$tmpdir/comp.hdr.yu12.mix.2.12 --stream-to=$tmpdir/raw.yu12.mix.2.12
 	# v4l2-ctl does not yet reallocate buffers if they are too small for the new format
 	$v4l2_ctl $decless_opts -v width=1920,height=1088 --stream-from-hdr=$tmpdir/comp.hdr.yu12.mix.2.12 --stream-to=$tmpdir/raw.yu12.mix.2.12.stateless
-	cmp $tmpdir/raw.yu12.mix.2.12 $tmpdir/raw.yu12.mix.2.12.stateless
+	vicodec_tests=$((vicodec_tests+1))
+	if cmp $tmpdir/raw.yu12.mix.2.12 $tmpdir/raw.yu12.mix.2.12.stateless ; then
+		echo "OK: stateful decode with dynamic resolution changes for every frame" | tee -a $tmp
+		vicodec_ok=$((vicodec_ok+1))
+	else
+		echo "FAIL: stateful decode with dynamic resolution changes for every frame: unexpected output" | tee -a $tmp
+		vicodec_fail=$((vicodec_fail+1))
+	fi
 
 	echo
 	echo stateful decode with dynamic resolution changes for every other frame | tee /dev/kmsg
@@ -604,7 +633,15 @@ if [ $vicodec -eq 1 -a $setup -eq 0 ]; then
 	$v4l2_ctl $decful_opts --stream-from-hdr=$tmpdir/comp.hdr.yu12.mix.4.6 --stream-to=$tmpdir/raw.yu12.mix.4.6
 	# v4l2-ctl does not yet reallocate buffers if they are too small for the new format
 	$v4l2_ctl $decless_opts -v width=1920,height=1088 --stream-from-hdr=$tmpdir/comp.hdr.yu12.mix.4.6 --stream-to=$tmpdir/raw.yu12.mix.4.6.stateless
-	cmp $tmpdir/raw.yu12.mix.4.6 $tmpdir/raw.yu12.mix.4.6.stateless
+	vicodec_tests=$((vicodec_tests+1))
+	if cmp $tmpdir/raw.yu12.mix.4.6 $tmpdir/raw.yu12.mix.4.6.stateless ; then
+		echo "OK: stateful decode with dynamic resolution changes for every other frame" | tee -a $tmp
+		vicodec_ok=$((vicodec_ok+1))
+	else
+		echo "FAIL: stateful decode with dynamic resolution changes for every other frame: unexpected output" | tee -a $tmp
+		vicodec_fail=$((vicodec_fail+1))
+	fi
+	echo Total for vicodec cmp tests: $vicodec_tests, Succeeded: $vicodec_ok, Failed: $vicodec_fail, Warnings: 0 | tee -a $tmp
 
 	rm -rf $tmpdir
 	echo
@@ -665,7 +702,7 @@ fi
 if [ $vidtv -eq 1 ]; then
 	rmmod dvb_vidtv_bridge dvb_vidtv_tuner dvb_vidtv_demod 2&>/dev/null
 	modprobe vidtv
-	sleep 2
+	sleep $modprobe_time
 	dmesg -n notice
 
 	if ! media-ctl -d platform:vidtv ; then
@@ -682,7 +719,7 @@ if [ $vidtv -eq 1 -a $setup -eq 0 ]; then
 	echo vidtv media controller compliance tests | tee /dev/kmsg
 	echo
 	date
-	stdbuf -oL $v4l2_compliance -M platform:vidtv 2>&1 | tee -a $tmp
+	stdbuf -oL $v4l2_compliance -m platform:vidtv 2>&1 | tee -a $tmp
 
 	echo
 	echo

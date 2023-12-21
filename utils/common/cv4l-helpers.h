@@ -82,6 +82,7 @@ public:
 	bool has_rw() const { return v4l_has_rw(this); }
 	bool has_streaming() const { return v4l_has_streaming(this); }
 	bool has_ext_pix_format() const { return v4l_has_ext_pix_format(this); }
+	bool has_streams() const { return have_streams; }
 
 	int querycap(v4l2_capability &cap, bool force = false)
 	{
@@ -742,6 +743,7 @@ public:
 	unsigned g_type() const { return v4l_queue_g_type(this); }
 	unsigned g_memory() const { return v4l_queue_g_memory(this); }
 	unsigned g_buffers() const { return v4l_queue_g_buffers(this); }
+	unsigned g_max_num_buffers() const { return v4l_queue_g_max_num_buffers(this); }
 	unsigned g_num_planes() const { return v4l_queue_g_num_planes(this); }
 	unsigned g_capabilities() const { return v4l_queue_g_capabilities(this); }
 	unsigned g_length(unsigned plane) const { return v4l_queue_g_length(this, plane); }

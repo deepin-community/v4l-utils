@@ -8,7 +8,7 @@ LOCAL_SRC_FILES := \
     crop.c \
     flip.c \
     helper.c \
-    hm12.c \
+    nv12_16l16.c \
     jidctflt.c \
     jl2005bcd.c \
     jpeg.c \
@@ -35,6 +35,7 @@ LOCAL_SRC_FILES := \
 
 LOCAL_CFLAGS += -Wno-missing-field-initializers
 LOCAL_CFLAGS += -Wno-sign-compare
+LOCAL_CFLAGS += -include ../../android-config.h
 
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/../include \

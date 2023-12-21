@@ -430,8 +430,11 @@ void GeneralTab::inputSection(v4l2_input vin)
 		QLabel *l = new QLabel("Refresh Tuner Status", parentWidget());
 		QWidget *w = new QWidget(parentWidget());
 		QHBoxLayout *box = new QHBoxLayout(w);
-
+#if QT_VERSION < 0x060000
 		box->setMargin(0);
+#else
+		box->setContentsMargins(0, 0, 0, 0);
+#endif
 		m_detectSubchans = new QToolButton(w);
 		m_detectSubchans->setIcon(QIcon(":/enterbutt.png"));
 		m_subchannels = new QLabel("", w);
@@ -1107,7 +1110,7 @@ bool GeneralTab::createAudioDeviceList()
 
 void GeneralTab::changeAudioDevice()
 {
-	m_audioOutDevice->setEnabled(getAudioInDevice() != NULL ? getAudioInDevice().compare("None") : false);
+	m_audioOutDevice->setEnabled(getAudioInDevice() != nullptr ? getAudioInDevice().compare("None") : false);
 	emit audioDeviceChanged();
 }
 
@@ -2390,8 +2393,14 @@ int GeneralTab::checkMatchAudioDevice(void *md, const char *vid, enum device_typ
 
 	while ((devname = get_associated_device(md, devname, type, vid, dtype)) != NULL) {
 		if (type == MEDIA_SND_CAP) {
+#if QT_VERSION < 0x060000
 			QStringList devAddr = QString(devname).split(QRegExp("[:,]"));
 			return devAddr.value(1).toInt();
+#else
+			QRegExp rx("[:,]");
+			rx.indexIn(devname);
+			return rx.cap(1).toInt();
+#endif
 		}
 	}
 	return -1;

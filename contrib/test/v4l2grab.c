@@ -12,7 +12,6 @@
  */
 
 #include <argp.h>
-#include <config.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/videodev2.h>
@@ -29,6 +28,8 @@
 
 #define CLEAR_P(x,s) memset((x), 0, s)
 #define CLEAR(x) CLEAR_P(&(x), sizeof(x))
+
+#define ARRAY_SIZE(a)  (sizeof(a)/sizeof(*a))
 
 static int libv4l = 1;
 static int ppm_output = 1;
@@ -61,6 +62,104 @@ static void xioctl(int fh, unsigned long int request, void *arg)
 			_IOC_NR(request), errno, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
+}
+
+struct video_formats {
+	unsigned int pixformat;
+	unsigned int depth;
+	int y_decimation;
+	int x_decimation;
+
+	unsigned int is_rgb:1;
+};
+
+struct colorspace_parms {
+	enum v4l2_colorspace		colorspace;
+	enum v4l2_xfer_func		xfer_func;
+	enum v4l2_ycbcr_encoding	ycbcr_enc;
+	enum v4l2_quantization		quantization;
+};
+
+static const struct video_formats supported_formats[] = {
+	{ V4L2_PIX_FMT_BGR32,   32, -1, -1, 1},
+	{ V4L2_PIX_FMT_ABGR32,  32, -1, -1, 1},
+	{ V4L2_PIX_FMT_XBGR32,  32, -1, -1, 1},
+	{ V4L2_PIX_FMT_RGB32,   32, -1, -1, 1},
+	{ V4L2_PIX_FMT_ARGB32,  32, -1, -1, 1},
+	{ V4L2_PIX_FMT_XRGB32,  32, -1, -1, 1},
+	{ V4L2_PIX_FMT_BGR24,   24, -1, -1, 1},
+	{ V4L2_PIX_FMT_RGB24,   24, -1, -1, 1},
+	{ V4L2_PIX_FMT_RGB565,  16, -1, -1, 1},
+	{ V4L2_PIX_FMT_RGB565X, 16, -1, -1, 1},
+	{ V4L2_PIX_FMT_YUYV,    16, -1, -1, 0},
+	{ V4L2_PIX_FMT_UYVY,    16, -1, -1, 0},
+	{ V4L2_PIX_FMT_YVYU,    16, -1, -1, 0},
+	{ V4L2_PIX_FMT_VYUY,    16, -1, -1, 0},
+	{ V4L2_PIX_FMT_NV12,     8, 1, -1, 0},
+	{ V4L2_PIX_FMT_NV21,     8, 1, -1, 0},
+	{ V4L2_PIX_FMT_NV16,     8, 0, -1, 0},
+	{ V4L2_PIX_FMT_NV61,     8, 0, -1, 0},
+	{ V4L2_PIX_FMT_YUV420,   8, 1, 1, 0},
+	{ V4L2_PIX_FMT_YVU420,   8, 1, 1, 0},
+	{ V4L2_PIX_FMT_YUV422P,  8, 0, 1, 0},
+};
+
+static const struct video_formats *video_fmt_props(unsigned int pixformat)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(supported_formats); i++)
+		if (supported_formats[i].pixformat == pixformat)
+			return &supported_formats[i];
+
+	return NULL;
+}
+
+static int is_format_supported(unsigned int pixformat)
+{
+	if (video_fmt_props(pixformat))
+		return 1;
+	return 0;
+}
+
+static void get_colorspace_data(struct colorspace_parms *c,
+			        struct v4l2_format *fmt)
+{
+	const struct video_formats *video_fmt;
+
+	memset(c, 0, sizeof(*c));
+
+	video_fmt = video_fmt_props(fmt->fmt.pix.pixelformat);
+	if (!video_fmt)
+		return;
+
+	/*
+	 * A more complete colorspace default detection would need to
+	 * implement timings API, in order to check for SDTV/HDTV.
+	 */
+	if (fmt->fmt.pix.colorspace == V4L2_COLORSPACE_DEFAULT)
+		c->colorspace = video_fmt->is_rgb ?
+				V4L2_COLORSPACE_SRGB :
+				V4L2_COLORSPACE_REC709;
+	else
+		c->colorspace = fmt->fmt.pix.colorspace;
+
+	if (fmt->fmt.pix.xfer_func == V4L2_XFER_FUNC_DEFAULT)
+		c->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(c->colorspace);
+	else
+		c->xfer_func = fmt->fmt.pix.xfer_func;
+
+	if (!video_fmt->is_rgb) {
+		if (fmt->fmt.pix.ycbcr_enc == V4L2_YCBCR_ENC_DEFAULT)
+			c->ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(c->colorspace);
+		else
+			c->ycbcr_enc = fmt->fmt.pix.ycbcr_enc;
+	}
+
+	if (fmt->fmt.pix.quantization == V4L2_QUANTIZATION_DEFAULT)
+		c->quantization = V4L2_MAP_QUANTIZATION_DEFAULT(video_fmt->is_rgb,
+								c->colorspace,
+								c->ycbcr_enc);
 }
 
 /*
@@ -109,8 +208,6 @@ static char *prt_caps(uint32_t caps, char *s)
 		strcat (s,"RADIO ");
 	if (V4L2_CAP_READWRITE & caps)
 		strcat (s,"READWRITE ");
-	if (V4L2_CAP_ASYNCIO & caps)
-		strcat (s,"ASYNCIO ");
 	if (V4L2_CAP_STREAMING & caps)
 		strcat (s,"STREAMING ");
 	if (V4L2_CAP_EXT_PIX_FORMAT & caps)
@@ -129,12 +226,6 @@ static char *prt_caps(uint32_t caps, char *s)
 		strcat (s,"SDR_OUTPUT ");
 	if(V4L2_CAP_META_CAPTURE & caps)
 		strcat (s,"META_CAPTURE ");
-	if(V4L2_CAP_READWRITE & caps)
-		strcat (s,"READWRITE ");
-	if(V4L2_CAP_ASYNCIO & caps)
-		strcat (s,"ASYNCIO ");
-	if(V4L2_CAP_STREAMING & caps)
-		strcat (s,"STREAMING ");
 	if(V4L2_CAP_META_OUTPUT & caps)
 		strcat (s,"META_OUTPUT ");
 	if(V4L2_CAP_TOUCH & caps)
@@ -185,12 +276,268 @@ static void querycap(char *fname, int fd, enum io_method method)
 	}
 }
 
+#define CLAMP(a)	((a) < 0 ? 0 : (a) > 255 ? 255 : (a))
+
+static void convert_yuv(struct colorspace_parms *c,
+			int32_t y, int32_t u, int32_t v,
+			unsigned char **dst)
+{
+	if (c->quantization == V4L2_QUANTIZATION_FULL_RANGE)
+		y *= 65536;
+	else
+		y = (y - 16) * 76284;
+
+	u -= 128;
+	v -= 128;
+
+	/*
+	 * TODO: add BT2020 and SMPTE240M and better handle
+	 * other differences
+	 */
+	switch (c->ycbcr_enc) {
+	case V4L2_YCBCR_ENC_601:
+	case V4L2_YCBCR_ENC_XV601:
+	case V4L2_YCBCR_ENC_SYCC:
+		/*
+		* ITU-R BT.601 matrix:
+		*    R = 1.164 * y +    0.0 * u +  1.596 * v
+		*    G = 1.164 * y + -0.392 * u + -0.813 * v
+		*    B = 1.164 * y +  2.017 * u +    0.0 * v
+		*/
+		*(*dst)++ = CLAMP((y              + 104595 * v) >> 16);
+		*(*dst)++ = CLAMP((y -  25690 * u -  53281 * v) >> 16);
+		*(*dst)++ = CLAMP((y + 132186 * u             ) >> 16);
+		break;
+	default:
+		/*
+		* ITU-R BT.709 matrix:
+		*    R = 1.164 * y +    0.0 * u +  1.793 * v
+		*    G = 1.164 * y + -0.213 * u + -0.533 * v
+		*    B = 1.164 * y +  2.112 * u +    0.0 * v
+		*/
+		*(*dst)++ = CLAMP((y              + 117506 * v) >> 16);
+		*(*dst)++ = CLAMP((y -  13959 * u -  34931 * v) >> 16);
+		*(*dst)++ = CLAMP((y + 138412 * u             ) >> 16);
+		break;
+	}
+}
+
+static void copy_two_pixels(struct v4l2_format *fmt,
+			    struct colorspace_parms *c,
+			    unsigned char *plane0,
+			    unsigned char *plane1,
+			    unsigned char *plane2,
+			    unsigned char **dst)
+{
+	uint32_t fourcc = fmt->fmt.pix.pixelformat;
+	int32_t y_off, u_off, u, v;
+	uint16_t pix;
+	int i;
+
+	switch (fmt->fmt.pix.pixelformat) {
+	case V4L2_PIX_FMT_RGB565: /* rrrrrggg gggbbbbb */
+		for (i = 0; i < 2; i++) {
+			pix = (plane0[0] << 8) + plane0[1];
+
+			*(*dst)++ = (unsigned char)(((pix & 0xf800) >> 11) << 3) | 0x07;
+			*(*dst)++ = (unsigned char)((((pix & 0x07e0) >> 5)) << 2) | 0x03;
+			*(*dst)++ = (unsigned char)((pix & 0x1f) << 3) | 0x07;
+
+			plane0 += 2;
+		}
+		break;
+	case V4L2_PIX_FMT_RGB565X: /* gggbbbbb rrrrrggg */
+		for (i = 0; i < 2; i++) {
+			pix = (plane0[1] << 8) + plane0[0];
+
+			*(*dst)++ = (unsigned char)(((pix & 0xf800) >> 11) << 3) | 0x07;
+			*(*dst)++ = (unsigned char)((((pix & 0x07e0) >> 5)) << 2) | 0x03;
+			*(*dst)++ = (unsigned char)((pix & 0x1f) << 3) | 0x07;
+
+			plane0 += 2;
+		}
+		break;
+	case V4L2_PIX_FMT_YUYV:
+	case V4L2_PIX_FMT_UYVY:
+	case V4L2_PIX_FMT_YVYU:
+	case V4L2_PIX_FMT_VYUY:
+		y_off = (fourcc == V4L2_PIX_FMT_YUYV || fourcc == V4L2_PIX_FMT_YVYU) ? 0 : 1;
+		u_off = (fourcc == V4L2_PIX_FMT_YUYV || fourcc == V4L2_PIX_FMT_UYVY) ? 0 : 2;
+
+		u = plane0[(1 - y_off) + u_off];
+		v = plane0[(1 - y_off) + (2 - u_off)];
+
+		for (i = 0; i < 2; i++)
+			convert_yuv(c, plane0[y_off + (i << 1)], u, v, dst);
+
+		break;
+	case V4L2_PIX_FMT_NV12:
+	case V4L2_PIX_FMT_NV16:
+		u = plane1[0];
+		v = plane1[1];
+
+		for (i = 0; i < 2; i++)
+			convert_yuv(c, plane0[i], u, v, dst);
+
+		break;
+	case V4L2_PIX_FMT_NV21:
+	case V4L2_PIX_FMT_NV61:
+		v = plane1[0];
+		u = plane1[1];
+
+		for (i = 0; i < 2; i++)
+			convert_yuv(c, plane0[i], u, v, dst);
+
+		break;
+	case V4L2_PIX_FMT_YUV420:
+	case V4L2_PIX_FMT_YUV422P:
+		u = plane1[0];
+		v = plane2[0];
+
+		for (i = 0; i < 2; i++)
+			convert_yuv(c, plane0[i], u, v, dst);
+
+		break;
+	case V4L2_PIX_FMT_YVU420:
+		v = plane1[0];
+		u = plane2[0];
+
+		for (i = 0; i < 2; i++)
+			convert_yuv(c, plane0[i], u, v, dst);
+
+		break;
+	case V4L2_PIX_FMT_RGB32:
+	case V4L2_PIX_FMT_ARGB32:
+	case V4L2_PIX_FMT_XRGB32:
+		for (i = 0; i < 2; i++) {
+			*(*dst)++ = plane0[1];
+			*(*dst)++ = plane0[2];
+			*(*dst)++ = plane0[3];
+
+			plane0 += 4;
+		}
+		break;
+	case V4L2_PIX_FMT_BGR32:
+	case V4L2_PIX_FMT_ABGR32:
+	case V4L2_PIX_FMT_XBGR32:
+		for (i = 0; i < 2; i++) {
+			*(*dst)++ = plane0[2];
+			*(*dst)++ = plane0[1];
+			*(*dst)++ = plane0[0];
+
+			plane0 += 4;
+		}
+		break;
+	default:
+	case V4L2_PIX_FMT_BGR24:
+		for (i = 0; i < 2; i++) {
+			*(*dst)++ = plane0[2];
+			*(*dst)++ = plane0[1];
+			*(*dst)++ = plane0[0];
+
+			plane0 += 3;
+		}
+		break;
+	}
+}
+
+static unsigned int convert_to_rgb24(struct v4l2_format *fmt,
+				     unsigned int imagesize,
+				     unsigned char *plane0,
+				     unsigned char *p_out)
+{
+	uint32_t width = fmt->fmt.pix.width;
+	uint32_t height = fmt->fmt.pix.height;
+	uint32_t bytesperline = fmt->fmt.pix.bytesperline;
+	const struct video_formats *video_fmt;
+	unsigned char *plane0_start = plane0;
+	unsigned char *plane1_start = NULL;
+	unsigned char *plane2_start = NULL;
+	unsigned char *plane1 = NULL;
+	unsigned char *plane2 = NULL;
+	struct colorspace_parms c;
+	unsigned int needed_size;
+	unsigned int x, y, depth;
+	uint32_t num_planes = 1;
+	unsigned char *p_start;
+	uint32_t plane0_size;
+	uint32_t w_dec = 0;
+	uint32_t h_dec = 0;
+
+	get_colorspace_data(&c, fmt);
+
+	video_fmt = video_fmt_props(fmt->fmt.pix.pixelformat);
+	if (!video_fmt)
+		return 0;
+
+	depth = video_fmt->depth;
+
+	plane0_size = width * height * depth;
+	needed_size = plane0_size;
+
+	if (video_fmt->y_decimation >= 0) {
+		num_planes++;
+		h_dec = video_fmt->y_decimation;
+		needed_size += plane0_size >> h_dec;
+	}
+
+	if (video_fmt->x_decimation >= 0) {
+		num_planes++;
+		w_dec = video_fmt->x_decimation;
+		needed_size += plane0_size >> w_dec;
+	}
+
+	plane0_size = plane0_size >> 3;
+	needed_size = needed_size >> 3;
+
+	if (imagesize < needed_size) {
+		fprintf(stderr, "Warning: Image too small! ");
+		fprintf(stderr, "Image size: %u bytes, need %u, being:\n", imagesize, needed_size);
+		fprintf(stderr, "\tPlane0 size: %u bytes\n", plane0_size);
+		if (video_fmt->y_decimation >= 0)
+			fprintf(stderr, "\tH Plane size: %u bytes\n", plane0_size >> h_dec);
+		if (video_fmt->x_decimation >= 0)
+			fprintf(stderr, "\tW Plane size: %u bytes\n", plane0_size >> w_dec);
+
+		// FIXME: should we bail-out here?
+		// exit(EXIT_FAILURE);
+	}
+
+	p_start = p_out;
+
+	if (num_planes > 1)
+		plane1_start = plane0_start + plane0_size;
+
+	if (num_planes > 2)
+		    plane2_start = plane1_start + (plane0_size >> (w_dec + h_dec));
+
+	for (y = 0; y < height; y++) {
+		plane0 = plane0_start + bytesperline * y;
+		if (num_planes > 1)
+			plane1 = plane1_start + (bytesperline >> w_dec) * (y >> h_dec);
+		if (num_planes > 2)
+			plane2 = plane2_start + (bytesperline >> w_dec) * (y >> h_dec);
+
+		for (x = 0; x < width >> 1; x++) {
+			copy_two_pixels(fmt, &c, plane0, plane1, plane2, &p_out);
+
+			plane0 += depth >> 2;
+			if (num_planes > 1)
+				plane1 += depth >> (2 + w_dec);
+			if (num_planes > 2)
+				plane2 += depth >> (2 + w_dec);
+		}
+	}
+
+	return p_out - p_start;
+}
+
 /*
  * Read I/O
  */
 static int read_capture_loop(int fd, struct buffer *buffers,
 			     struct v4l2_format *fmt, int n_frames,
-			     char *out_dir)
+			     unsigned char *out_buf, char *out_dir)
 {
 	unsigned int			i;
 	struct timeval			tv;
@@ -239,20 +586,30 @@ static int read_capture_loop(int fd, struct buffer *buffers,
 			fprintf(fout, "P6\n%d %d 255\n",
 				fmt->fmt.pix.width, fmt->fmt.pix.height);
 
-		fwrite(buffers[0].start, size, 1, fout);
+		if (!ppm_output || !out_buf) {
+			out_buf = buffers[0].start;
+		} else {
+			size = convert_to_rgb24(fmt, size,
+						buffers[0].start, out_buf);
+		}
+
+		fwrite(out_buf, size, 1, fout);
 		fclose(fout);
 	}
 	return 0;
 }
 
-static int read_capture(int fd, int n_frames, char *out_dir,
-			struct v4l2_format *fmt)
+static int read_capture(int fd, int n_frames, unsigned char *out_buf, char *out_dir,
+			struct v4l2_format *fmt, struct timeval *start)
 {
 	struct buffer                   *buffers;
+	struct timezone			tz = { 0 };
 
 	buffers = calloc(1, sizeof(*buffers));
 
-	return read_capture_loop(fd, buffers, fmt, n_frames, out_dir);
+	gettimeofday(start, &tz);
+
+	return read_capture_loop(fd, buffers, fmt, n_frames, out_buf, out_dir);
 }
 
 /*
@@ -260,7 +617,7 @@ static int read_capture(int fd, int n_frames, char *out_dir,
  */
 static int userptr_capture_loop(int fd, struct buffer *buffers,
 				int n_buffers, struct v4l2_format *fmt,
-				int n_frames, char *out_dir)
+				int n_frames, unsigned char *out_buf, char *out_dir)
 {
 	struct v4l2_buffer		buf;
 	unsigned int			i;
@@ -268,6 +625,7 @@ static int userptr_capture_loop(int fd, struct buffer *buffers,
 	int				r;
 	fd_set				fds;
 	FILE				*fout;
+	unsigned int			size;
 	char				out_name[25 + strlen(out_dir)];
 
 	for (i = 0; i < n_frames; i++) {
@@ -307,7 +665,16 @@ static int userptr_capture_loop(int fd, struct buffer *buffers,
 			fprintf(fout, "P6\n%d %d 255\n",
 				fmt->fmt.pix.width, fmt->fmt.pix.height);
 
-		fwrite(buffers[buf.index].start, buf.bytesused, 1, fout);
+		if (!ppm_output || !out_buf) {
+			out_buf = buffers[buf.index].start;
+			size = buf.bytesused;
+		} else {
+			size = convert_to_rgb24(fmt, buf.bytesused,
+						buffers[buf.index].start,
+						out_buf);
+		}
+
+		fwrite(out_buf, size, 1, fout);
 		fclose(fout);
 
 		if (i + 1 < n_frames)
@@ -316,13 +683,14 @@ static int userptr_capture_loop(int fd, struct buffer *buffers,
 	return 0;
 }
 
-static int userptr_capture(int fd, int n_frames, char *out_dir,
-			   struct v4l2_format *fmt)
+static int userptr_capture(int fd, int n_frames, unsigned char *out_buf, char *out_dir,
+			   struct v4l2_format *fmt, struct timeval *start)
 {
 	struct v4l2_buffer              buf;
 	struct v4l2_requestbuffers      req;
 	unsigned int                    ret, i, n_buffers;
 	struct buffer                   *buffers;
+	struct timezone			tz = { 0 };
 
 	CLEAR(req);
 	req.count  = 2;
@@ -335,6 +703,10 @@ static int userptr_capture(int fd, int n_frames, char *out_dir,
 		fprintf(stderr, "Out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Some compressed formats could return zero */
+	if (!fmt->fmt.pix.sizeimage)
+		fmt->fmt.pix.sizeimage = fmt->fmt.pix.width * fmt->fmt.pix.height * 3;
 
 	for (n_buffers = 0; n_buffers < req.count; ++n_buffers) {
 		buffers[n_buffers].length = fmt->fmt.pix.sizeimage;
@@ -358,8 +730,10 @@ static int userptr_capture(int fd, int n_frames, char *out_dir,
 
 	xioctl(fd, VIDIOC_STREAMON, &req.type);
 
+	gettimeofday(start, &tz);
+
 	ret = userptr_capture_loop(fd, buffers, req.count, fmt,
-				   n_frames, out_dir);
+				   n_frames, out_buf, out_dir);
 
 	xioctl(fd, VIDIOC_STREAMOFF, &req.type);
 
@@ -438,10 +812,11 @@ static void *produce_buffer (void * p)
  * this array and 'render' them */
 static int mmap_capture_threads(int fd, struct buffer *buffers,
 				int bufpool_size, struct v4l2_format *fmt,
-				int n_frames, char *out_dir, int sleep_ms)
+				int n_frames, unsigned char *out_buf, char *out_dir,
+				int sleep_ms)
 {
 	struct v4l2_buffer		buf;
-	unsigned int			i;
+	unsigned int			i, size;
 	struct buffer_queue		buf_queue;
 	pthread_t			producer;
 	char				out_name[25 + strlen(out_dir)];
@@ -495,7 +870,17 @@ static int mmap_capture_threads(int fd, struct buffer *buffers,
 
 		buf = buf_queue.buffers[buf_queue.read_pos %
 					buf_queue.buffers_size];
-		fwrite(buffers[buf.index].start, buf.bytesused, 1, fout);
+
+		if (!ppm_output || !out_buf) {
+			out_buf = buffers[buf.index].start;
+			size = buf.bytesused;
+		} else {
+			size = convert_to_rgb24(fmt, buf.bytesused,
+						buffers[buf.index].start,
+						out_buf);
+		}
+
+		fwrite(out_buf, size, 1, fout);
 		fclose(fout);
 
 		xioctl(fd, VIDIOC_QBUF, &buf);
@@ -515,12 +900,13 @@ static int mmap_capture_threads(int fd, struct buffer *buffers,
 
 static int mmap_capture_loop(int fd, struct buffer *buffers,
 			     struct v4l2_format *fmt, int n_frames,
-			     char *out_dir)
+			     unsigned char *out_buf, char *out_dir)
 {
 	struct v4l2_buffer		buf;
 	unsigned int			i;
 	struct timeval			tv;
 	int				r;
+	unsigned int			size;
 	fd_set				fds;
 	FILE				*fout;
 	char				out_name[25 + strlen(out_dir)];
@@ -560,7 +946,15 @@ static int mmap_capture_loop(int fd, struct buffer *buffers,
 			fprintf(fout, "P6\n%d %d 255\n",
 				fmt->fmt.pix.width, fmt->fmt.pix.height);
 
-		fwrite(buffers[buf.index].start, buf.bytesused, 1, fout);
+		if (!ppm_output || !out_buf) {
+			out_buf = buffers[buf.index].start;
+			size = buf.bytesused;
+		} else {
+			size = convert_to_rgb24(fmt, buf.bytesused,
+						buffers[buf.index].start,
+						out_buf);
+		}
+		fwrite(out_buf, size, 1, fout);
 		fclose(fout);
 
 		if (i + 1 < n_frames)
@@ -569,15 +963,16 @@ static int mmap_capture_loop(int fd, struct buffer *buffers,
 	return 0;
 }
 
-static int mmap_capture(int fd, int n_frames, char *out_dir,
-			int threads, int sleep_ms,
-			struct v4l2_format *fmt)
+static int mmap_capture(int fd, int n_frames, unsigned char *out_buf,
+			char *out_dir, int threads, int sleep_ms,
+			struct v4l2_format *fmt, struct timeval *start)
 {
 	struct v4l2_buffer              buf;
 	struct v4l2_requestbuffers      req;
 	enum v4l2_buf_type              type;
 	unsigned int                    i, n_buffers;
 	struct buffer                   *buffers;
+	struct timezone			tz = { 0 };
 
 	CLEAR(req);
 	req.count = 2;
@@ -626,11 +1021,14 @@ static int mmap_capture(int fd, int n_frames, char *out_dir,
 	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
 	xioctl(fd, VIDIOC_STREAMON, &type);
+
+	gettimeofday(start, &tz);
+
 	if (threads)
-		mmap_capture_threads(fd, buffers, 2, fmt, n_frames, out_dir,
-				sleep_ms);
+		mmap_capture_threads(fd, buffers, 2, fmt, n_frames, out_buf,
+				     out_dir, sleep_ms);
 	else
-		mmap_capture_loop(fd, buffers, fmt, n_frames, out_dir);
+		mmap_capture_loop(fd, buffers, fmt, n_frames, out_buf, out_dir);
 
 	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	xioctl(fd, VIDIOC_STREAMOFF, &type);
@@ -662,6 +1060,7 @@ static const struct argp_option options[] = {
 	{"yres",	'y',	"YRES",		0,	"vertical resolution", 0},
 	{"fourcc",	'f',	"FOURCC",	0,	"Linux fourcc code", 0},
 	{"userptr",	'u',	NULL,		0,	"Use user-defined memory capture method", 0},
+	{"raw",		'R',	NULL,		0,	"Save image in raw mode", 0},
 	{"read",	'r',	NULL,		0,	"Use read capture method", 0},
 	{"n-frames",	'n',	"NFRAMES",	0,	"number of frames to capture", 0},
 	{"thread-enable", 't',	"THREADS",	0,	"if different threads should capture and save", 0},
@@ -679,6 +1078,7 @@ static int	n_frames = 20;
 static int	threads = 0;
 static int	block = 0;
 static int	sleep_ms = 0;
+static int	raw_mode = 0;
 static uint32_t fourcc = V4L2_PIX_FMT_RGB24;
 enum io_method  method = IO_METHOD_MMAP;
 
@@ -733,6 +1133,9 @@ static error_t parse_opt(int k, char *arg, struct argp_state *state)
 	case 'r':
 		method = IO_METHOD_READ;
 		break;
+	case 'R':
+		raw_mode = 1;
+		break;
 	case 's':
 		val = atoi(arg);
 		if (val)
@@ -750,11 +1153,29 @@ static struct argp argp = {
 	.doc = doc,
 };
 
+static int elapsed_time(struct timeval *x, struct timeval *y)
+{
+	long int res;
+	int nsec;
+
+	nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
+	y->tv_usec -= 1000000 * nsec;
+	y->tv_sec += nsec;
+
+	res = (x->tv_sec - y->tv_sec) * 1000000;
+	res += x->tv_usec - y->tv_usec;
+
+	return res;
+}
 
 int main(int argc, char **argv)
 {
 	struct v4l2_format fmt;
 	int ret = EXIT_FAILURE, fd = -1;
+	unsigned char *out_buf = NULL;
+	struct timezone tz = { 0 };
+	struct timeval start, end;
+	long int elapsed;
 
 	argp_parse(&argp, argc, argv, 0, 0, 0);
 
@@ -786,13 +1207,29 @@ int main(int argc, char **argv)
 	fmt.fmt.pix.field       = V4L2_FIELD_INTERLACED;
 	xioctl(fd, VIDIOC_S_FMT, &fmt);
 
-	if (fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_RGB24) {
-		if (libv4l) {
-			printf("Libv4l didn't accept RGB24 format. Can't proceed.\n");
-			exit(EXIT_FAILURE);
+	if (raw_mode) {
+		printf("Raw mode: libv4l won't be used.\n");
+
+		libv4l = 0;
+		ppm_output = 0;
+	} else {
+		if (is_format_supported(fmt.fmt.pix.pixelformat)) {
+			out_buf = malloc(3 * fmt.fmt.pix.width * fmt.fmt.pix.height);
+			if (!out_buf) {
+				perror("Cannot allocate memory");
+				exit(EXIT_FAILURE);
+			}
 		} else {
-			printf("File output won't be in PPM format.\n");
-			ppm_output = 0;
+			/* Unknown formats */
+			if (libv4l) {
+				char *p = (void *)&fmt.fmt.pix.pixelformat;
+				printf("Doesn't know how to convert %c%c%c%c to PPM.\n",
+				    p[0], p[1], p[2], p[3]);
+				exit(EXIT_FAILURE);
+			} else {
+				printf("File output won't be in PPM format.\n");
+				ppm_output = 0;
+			}
 		}
 	}
 	if ((fmt.fmt.pix.width != x_res) || (fmt.fmt.pix.height != y_res))
@@ -802,15 +1239,26 @@ int main(int argc, char **argv)
 	/* Calls the desired capture method */
 	switch (method) {
 	case IO_METHOD_READ:
-		ret = read_capture(fd, n_frames, out_dir, &fmt);
+		ret = read_capture(fd, n_frames, out_buf, out_dir,
+				   &fmt, &start);
 		break;
 	case IO_METHOD_MMAP:
-		ret = mmap_capture(fd, n_frames, out_dir,
-				   threads, sleep_ms, &fmt);
+		ret = mmap_capture(fd, n_frames, out_buf, out_dir,
+				   threads, sleep_ms, &fmt, &start);
 		break;
 	case IO_METHOD_USERPTR:
-		ret = userptr_capture(fd, n_frames, out_dir, &fmt);
+		ret = userptr_capture(fd, n_frames, out_buf, out_dir, &fmt,
+				      &start);
 		break;
+	}
+
+	if (!ret) {
+		gettimeofday(&end, &tz);
+
+		elapsed = elapsed_time(&end, &start);
+
+		printf("Received %d frames in %.2f seconds: %.2f fps\n",
+		    n_frames, elapsed / 1000000., 1000000. * n_frames/ elapsed);
 	}
 
 	/* Closes the file descriptor */

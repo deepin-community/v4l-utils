@@ -17,12 +17,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifdef ENABLE_ALSA
-extern "C" {
-#include "alsa_stream.h"
-}
-#endif
-
 #include <QToolBar>
 #include <QToolButton>
 #include <QMenuBar>
@@ -45,6 +39,7 @@ extern "C" {
 #include <QThread>
 #include <QCloseEvent>
 #include <QInputDialog>
+#include <QActionGroup>
 
 #include <assert.h>
 #include <sys/mman.h>
@@ -137,19 +132,19 @@ ApplicationWindow::ApplicationWindow() :
 
 	QAction *openAct = new QAction(QIcon(":/fileopen.png"), "&Open Device", this);
 	openAct->setStatusTip("Open a v4l device, use libv4l2 wrapper if possible");
-	openAct->setShortcut(Qt::CTRL+Qt::Key_O);
+	openAct->setShortcut(Qt::CTRL|Qt::Key_O);
 	connect(openAct, SIGNAL(triggered()), this, SLOT(opendev()));
 
 	QAction *openRawAct = new QAction(QIcon(":/fileopen.png"), "Open &Raw Device", this);
 	openRawAct->setStatusTip("Open a v4l device without using the libv4l2 wrapper");
-	openRawAct->setShortcut(Qt::CTRL+Qt::Key_R);
+	openRawAct->setShortcut(Qt::CTRL|Qt::Key_R);
 	connect(openRawAct, SIGNAL(triggered()), this, SLOT(openrawdev()));
 
 	m_capStartAct = new QAction(QIcon(":/start.png"), "Start &Capturing", this);
 	m_capStartAct->setStatusTip("Start capturing");
 	m_capStartAct->setCheckable(true);
 	m_capStartAct->setDisabled(true);
-	m_capStartAct->setShortcut(Qt::CTRL+Qt::Key_V);
+	m_capStartAct->setShortcut(Qt::CTRL|Qt::Key_V);
 	connect(m_capStartAct, SIGNAL(toggled(bool)), this, SLOT(capStart(bool)));
 
 	m_capStepAct = new QAction(QIcon(":/step.png"), "Single Step", this);
@@ -174,7 +169,7 @@ ApplicationWindow::ApplicationWindow() :
 
 	QAction *closeAct = new QAction(QIcon(":/fileclose.png"), "&Close Device", this);
 	closeAct->setStatusTip("Close");
-	closeAct->setShortcut(Qt::CTRL+Qt::Key_W);
+	closeAct->setShortcut(Qt::CTRL|Qt::Key_W);
 	connect(closeAct, SIGNAL(triggered()), this, SLOT(closeDevice()));
 
 	QAction *traceAct = new QAction("&Trace IOCTLs", this);
@@ -184,7 +179,7 @@ ApplicationWindow::ApplicationWindow() :
 
 	QAction *quitAct = new QAction(QIcon(":/exit.png"), "&Quit", this);
 	quitAct->setStatusTip("Exit the application");
-	quitAct->setShortcut(Qt::CTRL+Qt::Key_Q);
+	quitAct->setShortcut(Qt::CTRL|Qt::Key_Q);
 	connect(quitAct, SIGNAL(triggered()), this, SLOT(close()));
 
 	QMenu *fileMenu = menuBar()->addMenu("&File");
@@ -214,7 +209,7 @@ ApplicationWindow::ApplicationWindow() :
 
 	m_resetScalingAct = new QAction("Resize to &Frame Size", this);
 	m_resetScalingAct->setStatusTip("Resizes the capture window to match frame size");
-	m_resetScalingAct->setShortcut(Qt::CTRL+Qt::Key_F);
+	m_resetScalingAct->setShortcut(Qt::CTRL|Qt::Key_F);
 
 	m_overrideColorspace = -1;
 	QMenu *menu = new QMenu("Override Colorspace");
@@ -329,7 +324,11 @@ ApplicationWindow::ApplicationWindow() :
 #endif
 
 	QMenu *helpMenu = menuBar()->addMenu("&Help");
+#if QT_VERSION < 0x060000
 	helpMenu->addAction("&About", this, SLOT(about()), Qt::Key_F1);
+#else
+	helpMenu->addAction("&About", Qt::Key_F1, this, SLOT(about()));
+#endif
 
 	QAction *whatAct = QWhatsThis::createAction(this);
 	helpMenu->addAction(whatAct);
@@ -402,7 +401,11 @@ void ApplicationWindow::setDevice(const QString &device, bool rawOpen)
 {
 	closeDevice();
 	m_sigMapper = new QSignalMapper(this);
+#if QT_VERSION < 0x060000
 	connect(m_sigMapper, SIGNAL(mapped(int)), this, SLOT(ctrlAction(int)));
+#else
+	connect(m_sigMapper, &QSignalMapper::mappedInt, this, &ApplicationWindow::ctrlAction);
+#endif
 
 	s_direct(rawOpen);
 
@@ -456,9 +459,9 @@ void ApplicationWindow::setDevice(const QString &device, bool rawOpen)
 	else
 		m_convertData = v4lconvert_create(g_fd());
 	bool canStream = has_rw() || has_streaming();
-	bool isCapture = v4l_type_is_capture(g_type());
-	m_capStartAct->setEnabled(canStream);
-	m_capStepAct->setEnabled(canStream && isCapture);
+	bool isCapture = v4l_type_is_capture(g_type()) && !has_radio_tx();
+	m_capStartAct->setEnabled(canStream || isCapture);
+	m_capStepAct->setEnabled(canStream && isCapture && !has_radio_rx());
 	m_saveRawAct->setEnabled(canStream && has_vid_cap());
 	m_snapshotAct->setEnabled(canStream && has_vid_cap());
 	m_capMenu->setEnabled(canStream && isCapture && !has_radio_rx());
@@ -1264,7 +1267,7 @@ void ApplicationWindow::startAudio()
 	QString audIn = m_genTab->getAudioInDevice();
 	QString audOut = m_genTab->getAudioOutDevice();
 
-	if (audIn != NULL && audOut != NULL && audIn.compare("None") && audIn.compare(audOut) != 0) {
+	if (audIn != nullptr && audOut != nullptr && audIn.compare("None") && audIn.compare(audOut) != 0) {
 		alsa_thread_startup(audOut.toLatin1().data(), audIn.toLatin1().data(),
 				    m_genTab->getAudioDeviceBufferSize(), NULL, 0);
 
@@ -1492,7 +1495,7 @@ void ApplicationWindow::capStart(bool start)
 		cv4l_fmt fmt;
 
 		if (g_fmt(fmt)) {
-			error("could not obtain an VBI format\n");
+			error("could not obtain an SDR format\n");
 			return;
 		}
 		if (fmt.fmt.sdr.pixelformat != V4L2_SDR_FMT_CU8) {
@@ -1567,12 +1570,14 @@ void ApplicationWindow::capStart(bool start)
 	case V4L2_PIX_FMT_YUV32:
 	case V4L2_PIX_FMT_XYUV32:
 	case V4L2_PIX_FMT_VUYX32:
+	case V4L2_PIX_FMT_YUVX32:
 		dstFmt = QImage::Format_RGB32;
 		break;
 	case V4L2_PIX_FMT_ARGB32:
 	case V4L2_PIX_FMT_ABGR32:
 	case V4L2_PIX_FMT_AYUV32:
 	case V4L2_PIX_FMT_VUYA32:
+	case V4L2_PIX_FMT_YUVA32:
 		dstFmt = QImage::Format_ARGB32;
 		break;
 	case V4L2_PIX_FMT_INZI:
@@ -1913,13 +1918,13 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (video_device != NULL)
+	if (video_device != nullptr)
 		device = getDeviceName("/dev/video", video_device);
-	else if (vbi_device != NULL)
+	else if (vbi_device != nullptr)
 		device = getDeviceName("/dev/vbi", vbi_device);
-	else if (radio_device != NULL)
+	else if (radio_device != nullptr)
 		device = getDeviceName("/dev/radio", radio_device);
-	else if (sdr_device != NULL)
+	else if (sdr_device != nullptr)
 		device = getDeviceName("/dev/swradio", sdr_device);
 	else
 		device = "/dev/video0";

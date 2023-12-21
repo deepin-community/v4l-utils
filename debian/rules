@@ -4,34 +4,45 @@
 export QT_SELECT=qt5
 export DEB_BUILD_MAINT_OPTIONS = hardening=+bindnow
 
-# latex generation seems to be broken
-CONFIGURE_FLAGS += --enable-doxygen-man --disable-doxygen-ps --disable-doxygen-pdf
-CONFIGURE_FLAGS += --disable-qvidcap
+CONFIGURE_FLAGS += -Ddefault_library=both
+CONFIGURE_FLAGS += -Ddoxygen-html=true
+CONFIGURE_FLAGS += -Dgconv=disabled
+CONFIGURE_FLAGS += -Dv4l2-compliance-32=false
+CONFIGURE_FLAGS += -Dv4l2-ctl-32=false
+CONFIGURE_FLAGS += -Dv4l2-tracer=disabled
+
+# see https://salsa.debian.org/qt-kde-team/qt/qtbase/-/blob/master/debian/rules#L33
+gles2_architectures := armel armhf
+ifeq ($(DEB_HOST_ARCH),$(findstring $(DEB_HOST_ARCH), $(gles2_architectures)))
+CONFIGURE_FLAGS += -Dqvidcap=disabled
+BUILD_PACKAGES = -Nqvidcap
+endif
+
+ifeq ($(DEB_HOST_ARCH_OS),linux)
+deb_systemdsystemunitdir = $(shell pkg-config --variable=systemdsystemunitdir systemd | sed s,^/,,)
+deb_udevdir = $(shell pkg-config --variable=udevdir udev | sed s,^/,,)
+endif
 
 %:
-	dh $@
-
-override_dh_autoreconf:
-	dh_autoreconf ./bootstrap.sh
+	dh $@ --buildsystem=meson+ninja $(BUILD_PACKAGES)
 
 override_dh_auto_clean:
 	dh_auto_clean
 	rm -f debian/ir-keytable.install.$(DEB_HOST_ARCH)
 
 override_dh_auto_configure:
-	dh_auto_configure -- --disable-silent-rules --with-libv4lconvertsubdir=libv4lconvert0 $(CONFIGURE_FLAGS)
-
-override_dh_auto_build:
-	dh_auto_build
-	$(MAKE) doxygen-run
+	dh_auto_configure -- -Dlibv4lconvertsubdir=libv4lconvert0 $(CONFIGURE_FLAGS)
 
 override_dh_install:
 	# Remove useless autogenreated doxygen files
-	rm -f doxygen-doc/html/*.md5
+	rm -f usr/share/doc/v4l-utils/html/*.md5
 
+ifeq ($(DEB_HOST_ARCH_OS),linux)
 	# this file is only conditionally created (clang availablility, enabled systemd filters)
 	cp -f debian/ir-keytable.install debian/ir-keytable.install.$(DEB_HOST_ARCH)
-	test ! -f debian/tmp/lib/systemd/system/systemd-udevd.service.d/50-rc_keymap.conf || echo lib/systemd/system/systemd-udevd.service.d/50-rc_keymap.conf >> debian/ir-keytable.install.$(DEB_HOST_ARCH)
+	test ! -f debian/tmp/$(deb_systemdsystemunitdir)/systemd-udevd.service.d/50-rc_keymap.conf || echo $(deb_systemdsystemunitdir)/systemd-udevd.service.d/50-rc_keymap.conf >> debian/ir-keytable.install.$(DEB_HOST_ARCH)
+	echo $(deb_udevdir) >> debian/ir-keytable.install.$(DEB_HOST_ARCH)
+endif
 
 	dh_install
 

@@ -26,8 +26,6 @@
 #include <argp.h>
 #include <sysexits.h>
 
-#include <config.h>
-
 #include <linux/lirc.h>
 
 #include "ir-encode.h"
@@ -60,11 +58,16 @@
 #define LIRCBUF_SIZE 1024
 #define IR_DEFAULT_TIMEOUT 125000
 #define UNSET UINT32_MAX
-/* Maximum number of columns per line */
-#define LINE_SIZE 8192
 
 const char *argp_program_version = "IR ctl version " V4L_UTILS_VERSION;
 const char *argp_program_bug_address = "Sean Young <sean@mess.org>";
+
+enum send_ty {
+	SEND_RAW,
+	SEND_SCANCODE,
+	SEND_KEYCODE,
+	SEND_GAP,
+};
 
 /*
  * Since this program drives the lirc interface, use the same terminology
@@ -72,8 +75,7 @@ const char *argp_program_bug_address = "Sean Young <sean@mess.org>";
 struct send {
 	struct send *next;
 	const char *fname;
-	bool is_scancode;
-	bool is_keycode;
+	enum send_ty ty;
 	union {
 		struct {
 			unsigned carrier;
@@ -84,7 +86,8 @@ struct send {
 			unsigned scancode;
 			unsigned protocol;
 		};
-		char	keycode[1];
+		char keycode[1];
+		unsigned gap;
 	};
 };
 
@@ -213,7 +216,8 @@ static struct send *read_file_pulse_space(struct arguments *args, const char *fn
 {
 	bool expect_pulse = true;
 	int lineno = 0, lastspace = 0;
-	char line[LINE_SIZE];
+	char *line = NULL;
+	size_t line_size;
 	int len = 0;
 	static const char whitespace[] = " \n\r\t";
 	struct send *f;
@@ -223,12 +227,11 @@ static struct send *read_file_pulse_space(struct arguments *args, const char *fn
 		fprintf(stderr, _("Failed to allocate memory\n"));
 		return NULL;
 	}
-	f->is_scancode = false;
-	f->is_keycode = false;
+	f->ty = SEND_RAW;
 	f->carrier = UNSET;
 	f->fname = fname;
 
-	while (fgets(line, sizeof(line), input)) {
+	while (getline(&line, &line_size, input) > 0) {
 		char *p, *saveptr;
 		lineno++;
 		char *keyword = strtok_r(line, whitespace, &saveptr);
@@ -360,6 +363,7 @@ static struct send *read_file_pulse_space(struct arguments *args, const char *fn
 		}
 	}
 
+	free(line);
 	fclose(input);
 
 	if (len == 0) {
@@ -382,7 +386,8 @@ static struct send *read_file_pulse_space(struct arguments *args, const char *fn
 static struct send *read_file_raw(struct arguments *args, const char *fname, FILE *input)
 {
 	int lineno = 0, lastspace = 0;
-	char line[LINE_SIZE];
+	char *line = NULL;
+	size_t line_size;
 	int len = 0;
 	static const char whitespace[] = " \n\r\t,";
 	struct send *f;
@@ -393,12 +398,11 @@ static struct send *read_file_raw(struct arguments *args, const char *fname, FIL
 		fclose(input);
 		return NULL;
 	}
-	f->is_scancode = false;
-	f->is_keycode = false;
+	f->ty = SEND_RAW;
 	f->carrier = UNSET;
 	f->fname = fname;
 
-	while (fgets(line, sizeof(line), input)) {
+	while (getline(&line, &line_size, input) > 0) {
 		long int value;
 		char *p, *saveptr;
 		lineno++;
@@ -454,6 +458,7 @@ static struct send *read_file_raw(struct arguments *args, const char *fname, FIL
 		}
 	}
 
+	free(line);
 	fclose(input);
 
 	if (len == 0) {
@@ -476,14 +481,15 @@ static struct send *read_file_raw(struct arguments *args, const char *fname, FIL
 static struct send *read_file(struct arguments *args, const char *fname)
 {
 	FILE *input = fopen(fname, "r");
-	char line[LINE_SIZE];
+	char *line = NULL;
+	size_t line_size;
 
 	if (!input) {
 		fprintf(stderr, _("%s: could not open: %m\n"), fname);
 		return NULL;
 	}
 
-	while (fgets(line, sizeof(line), input)) {
+	while (getline(&line, &line_size, input) > 0) {
 		int start = 0;
 
 		while (isspace(line[start]))
@@ -507,6 +513,7 @@ static struct send *read_file(struct arguments *args, const char *fname)
 		}
 	}
 
+	free(line);
 	fclose(input);
 
 	fprintf(stderr, _("%s: file is empty\n"), fname);
@@ -549,12 +556,31 @@ static struct send *read_scancode(const char *name)
 		return NULL;
 	}
 
-	f->is_scancode = true;
-	f->is_keycode = false;
+	f->ty = SEND_SCANCODE;
 	f->scancode = scancode;
 	f->protocol = proto;
 
 	return f;
+}
+
+static void add_to_send_list(struct arguments *arguments, struct send *send)
+{
+	send->next = NULL;
+
+	if (arguments->send == NULL)
+		arguments->send = send;
+	else {
+		// introduce gap
+		struct send *gap = malloc(sizeof(*gap));
+		gap->ty = SEND_GAP;
+		gap->fname= NULL;
+		gap->gap = arguments->gap;
+		gap->next = send;
+
+		struct send *p = arguments->send;
+		while (p->next) p = p->next;
+		p->next = gap;
+	}
 }
 
 static error_t parse_opt(int k, char *arg, struct argp_state *state)
@@ -664,14 +690,7 @@ static error_t parse_opt(int k, char *arg, struct argp_state *state)
 		if (s == NULL)
 			exit(EX_DATAERR);
 
-		s->next = NULL;
-		if (arguments->send == NULL)
-			arguments->send = s;
-		else {
-			struct send *p = arguments->send;
-			while (p->next) p = p->next;
-			p->next = s;
-		}
+		add_to_send_list(arguments, s);
 		break;
 	case 'S':
 		if (arguments->receive || arguments->features)
@@ -680,14 +699,7 @@ static error_t parse_opt(int k, char *arg, struct argp_state *state)
 		if (s == NULL)
 			exit(EX_DATAERR);
 
-		s->next = NULL;
-		if (arguments->send == NULL)
-			arguments->send = s;
-		else {
-			struct send *p = arguments->send;
-			while (p->next) p = p->next;
-			p->next = s;
-		}
+		add_to_send_list(arguments, s);
 		break;
 
 	case 'K':
@@ -696,18 +708,10 @@ static error_t parse_opt(int k, char *arg, struct argp_state *state)
 		s = malloc(sizeof(*s) + strlen(arg));
 		if (s == NULL)
 			exit(EX_DATAERR);
-
-		s->next = NULL;
 		strcpy(s->keycode, arg);
-		s->is_scancode = false;
-		s->is_keycode = true;
-		if (arguments->send == NULL)
-			arguments->send = s;
-		else {
-			struct send *p = arguments->send;
-			while (p->next) p = p->next;
-			p->next = s;
-		}
+		s->ty = SEND_KEYCODE;
+
+		add_to_send_list(arguments, s);
 		break;
 
 	case 'k':
@@ -757,8 +761,7 @@ static struct send* convert_keycode(struct keymap *map, const char *keycode)
 				s = malloc(sizeof(*s) + re->raw_length * sizeof(int));
 				s->len = re->raw_length;
 				memcpy(s->buf, re->raw, s->len * sizeof(int));
-				s->is_scancode = false;
-				s->is_keycode = false;
+				s->ty = SEND_RAW;
 				s->carrier = keymap_param(map, "carrier", 0);
 				s->next = NULL;
 			}
@@ -783,16 +786,14 @@ static struct send* convert_keycode(struct keymap *map, const char *keycode)
 				s = malloc(sizeof(*s));
 				s->protocol = proto;
 				s->scancode = se->scancode;
-				s->is_scancode = true;
-				s->is_keycode = false;
+				s->ty = SEND_SCANCODE;
 				s->next = NULL;
 			} else if (encode_bpf_protocol(map, se->scancode,
 						       buf, &length)) {
 				s = malloc(sizeof(*s) + sizeof(int) * length);
 				s->len = length;
 				memcpy(s->buf, buf, length * sizeof(int));
-				s->is_scancode = false;
-				s->is_keycode = false;
+				s->ty = SEND_RAW;
 				s->carrier = keymap_param(map, "carrier", 0);
 				s->next = NULL;
 			} else {
@@ -1049,7 +1050,7 @@ static int lirc_send(struct arguments *args, int fd, unsigned features, struct s
 		return EX_UNAVAILABLE;
 	}
 
-	if (f->is_scancode) {
+	if (f->ty == SEND_SCANCODE) {
 		if (args->verbose)
 			printf("Sending to kernel encoder protocol:%s scancode:0x%x\n",
 			       protocol_name(f->protocol), f->scancode);
@@ -1075,7 +1076,7 @@ static int lirc_send(struct arguments *args, int fd, unsigned features, struct s
 		return EX_UNAVAILABLE;
 	}
 
-	if (f->is_scancode) {
+	if (f->ty == SEND_SCANCODE) {
 		// encode scancode
 		enum rc_proto proto = f->protocol;
 		if (!protocol_encoder_available(proto)) {
@@ -1198,13 +1199,18 @@ int lirc_receive(struct arguments *args, int fd, unsigned features)
 				case LIRC_MODE2_FREQUENCY:
 					fprintf(out, "carrier %u\n", val);
 					break;
+				case LIRC_MODE2_OVERFLOW:
+					fprintf(out, "overflow\n");
+					leading_space = true;
+					break;
 				}
 			} else {
 				switch (msg) {
 				case LIRC_MODE2_TIMEOUT:
-					fprintf(out, "-%u\n", val);
 					if (carrier)
-						fprintf(out, " # carrier %uHz, timeout %u\n", carrier, val);
+						fprintf(out, "-%u # carrier %uHz\n", val, carrier);
+					else
+						fprintf(out, "-%u\n", val);
 					leading_space = true;
 					carrier = 0;
 					break;
@@ -1216,6 +1222,14 @@ int lirc_receive(struct arguments *args, int fd, unsigned features)
 					break;
 				case LIRC_MODE2_FREQUENCY:
 					carrier = val;
+					break;
+				case LIRC_MODE2_OVERFLOW:
+					if (carrier)
+						fprintf(out, "# carrier %uHz, overflow\n", carrier);
+					else
+						fprintf(out, "# overflow\n");
+					leading_space = true;
+					carrier = 0;
 					break;
 				}
 			}
@@ -1265,29 +1279,30 @@ int main(int argc, char *argv[])
 	struct send *s = args.send;
 	while (s) {
 		struct send *next = s->next;
-		if (s != args.send)
-			usleep(args.gap);
+		if (s->ty == SEND_GAP) {
+			usleep(s->gap);
+		} else {
+			if (s->ty == SEND_KEYCODE) {
+				struct send *k;
 
-		if (s->is_keycode) {
-			struct send *k;
+				if (!args.keymap) {
+					fprintf(stderr, _("error: no keymap specified\n"));
+					exit(EX_DATAERR);
+				}
 
-			if (!args.keymap) {
-				fprintf(stderr, _("error: no keymap specified\n"));
-				exit(EX_DATAERR);
+				k = convert_keycode(args.keymap, s->keycode);
+				if (!k)
+					exit(EX_DATAERR);
+
+				free(s);
+				s = k;
 			}
 
-			k = convert_keycode(args.keymap, s->keycode);
-			if (!k)
-				exit(EX_DATAERR);
-
-			free(s);
-			s = k;
-		}
-
-		rc = lirc_send(&args, fd, features, s);
-		if (rc) {
-			close(fd);
-			exit(rc);
+			rc = lirc_send(&args, fd, features, s);
+			if (rc) {
+				close(fd);
+				exit(rc);
+			}
 		}
 
 		free(s);
