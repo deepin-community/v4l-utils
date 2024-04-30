@@ -19,9 +19,7 @@ Build-Depends: debhelper-compat (= 13),
                libudev-dev [linux-any],
                libx11-dev,
                pkg-config,
-               systemd [linux-any],
-               systemd-dev [linux-any],
-               udev [linux-any]
+               systemd-dev [linux-any]
 Standards-Version: 4.6.2
 Vcs-Browser: https://salsa.debian.org/debian/libv4l
 Vcs-Git: https://salsa.debian.org/debian/libv4l.git
