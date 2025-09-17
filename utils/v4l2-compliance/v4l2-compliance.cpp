@@ -645,6 +645,7 @@ static int testCap(struct node *node)
 		V4L2_CAP_VIDEO_M2M_MPLANE;
 	const __u32 splane_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OUTPUT |
 		V4L2_CAP_VIDEO_M2M;
+	const __u32 edid_caps = V4L2_CAP_EDID;
 
 	memset(&vcap, 0xff, sizeof(vcap));
 	fail_on_test(doioctl(node, VIDIOC_QUERYCAP, &vcap));
@@ -663,6 +664,7 @@ static int testCap(struct node *node)
 	    memcmp(vcap.bus_info, "platform:", 9) &&
 	    memcmp(vcap.bus_info, "rmi4:", 5) &&
 	    memcmp(vcap.bus_info, "libcamera:", 10) &&
+	    memcmp(vcap.bus_info, "serio:", 6) &&
 	    memcmp(vcap.bus_info, "gadget.", 7))
 		return fail("missing bus_info prefix ('%s')\n", vcap.bus_info);
 	if (!node->media_bus_info.empty() &&
@@ -685,7 +687,13 @@ static int testCap(struct node *node)
 	// for a modern driver for both caps and dcaps
 	fail_on_test(!(caps & V4L2_CAP_EXT_PIX_FORMAT));
 	//fail_on_test(!(dcaps & V4L2_CAP_EXT_PIX_FORMAT));
-	fail_on_test(node->is_video && !(dcaps & video_caps));
+	if (node->is_video) {
+		fail_on_test(!(dcaps & (video_caps | edid_caps)));
+		if (dcaps & edid_caps)
+			fail_on_test(dcaps & video_caps);
+		else if (dcaps & video_caps)
+			fail_on_test(dcaps & edid_caps);
+	}
 	fail_on_test(node->is_radio && !(dcaps & radio_caps));
 	// V4L2_CAP_AUDIO is invalid for radio and sdr
 	fail_on_test(node->is_radio && (dcaps & V4L2_CAP_AUDIO));
@@ -973,6 +981,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 	struct node node2;
 	struct v4l2_capability vcap = {};
 	struct v4l2_subdev_capability subdevcap = {};
+	struct v4l2_subdev_client_capability subdevclientcap = {};
 	std::string driver;
 
 	tests_total = tests_ok = warnings = 0;
@@ -993,6 +1002,9 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		determine_codec_mask(node);
 	} else if (node.is_subdev()) {
 		doioctl(&node, VIDIOC_SUBDEV_QUERYCAP, &subdevcap);
+		subdevclientcap.capabilities = ~0ULL;
+		if (doioctl(&node, VIDIOC_SUBDEV_S_CLIENT_CAP, &subdevclientcap))
+			subdevclientcap.capabilities = 0ULL;
 	} else {
 		memset(&vcap, 0, sizeof(vcap));
 	}
@@ -1030,6 +1042,14 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 			 V4L2_CAP_VIDEO_OUTPUT_MPLANE | V4L2_CAP_SLICED_VBI_OUTPUT |
 			 V4L2_CAP_META_OUTPUT))
 		node.has_outputs = true;
+	if (node.g_caps() & V4L2_CAP_EDID) {
+		int tmp;
+
+		if (!ioctl(node.g_fd(), VIDIOC_G_INPUT, &tmp))
+			node.has_inputs = true;
+		else if (!ioctl(node.g_fd(), VIDIOC_G_OUTPUT, &tmp))
+			node.has_outputs = true;
+	}
 	if (node.g_caps() & (V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VBI_CAPTURE |
 			 V4L2_CAP_VIDEO_CAPTURE_MPLANE | V4L2_CAP_VIDEO_M2M_MPLANE |
 			 V4L2_CAP_VIDEO_M2M | V4L2_CAP_SLICED_VBI_CAPTURE |
@@ -1079,7 +1099,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		}
 	} else if (node.is_subdev()) {
 		printf("Driver Info:\n");
-		v4l2_info_subdev_capability(subdevcap);
+		v4l2_info_subdev_capability(subdevcap, subdevclientcap);
 	}
 
 	__u32 ent_id = 0;
@@ -1268,15 +1288,17 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 
 			for (unsigned which = V4L2_SUBDEV_FORMAT_TRY;
 				which <= V4L2_SUBDEV_FORMAT_ACTIVE; which++) {
+				struct v4l2_subdev_routing &routing = sd_routing[which];
 
-				sd_routing[which].which = which;
-				sd_routing[which].routes = (__u64)sd_routes[which];
-				sd_routing[which].num_routes = NUM_ROUTES_MAX;
+				routing.which = which;
+				routing.routes = (uintptr_t)sd_routes[which];
+				routing.len_routes = NUM_ROUTES_MAX;
+				routing.num_routes = 0;
 
-				ret = doioctl(&node, VIDIOC_SUBDEV_G_ROUTING, &sd_routing[which]);
+				ret = doioctl(&node, VIDIOC_SUBDEV_G_ROUTING, &routing);
 				if (ret) {
 					fail("VIDIOC_SUBDEV_G_ROUTING: failed to get routing\n");
-					sd_routing[which].num_routes = 0;
+					routing.num_routes = 0;
 				}
 			}
 		}
@@ -1301,7 +1323,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 					routes = sd_routes[which];
 				} else {
 					dummy_routing.num_routes = 1;
-					dummy_routing.routes = (__u64)&dummy_routes;
+					dummy_routing.routes = (uintptr_t)&dummy_routes;
 					dummy_routes[0].source_pad = pad;
 					dummy_routes[0].source_stream = 0;
 					dummy_routes[0].sink_pad = pad;
@@ -1341,8 +1363,9 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 					       which ? "Active" : "Try",
 					       ok(testSubDevSelection(&node, which, pad, stream)));
 					if (which)
-						printf("\ttest VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: %s\n",
-						       ok(testSubDevFrameInterval(&node, pad, stream)));
+						printf("\ttest %s VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: %s\n",
+						       which ? "Active" : "Try",
+						       ok(testSubDevFrameInterval(&node, which, pad, stream)));
 				}
 			}
 
@@ -1365,6 +1388,13 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 				if (node.has_subdev_selection &&
 				    node.has_subdev_selection != node.has_subdev_fmt)
 					fail("VIDIOC_SUBDEV_G/S_SELECTION: fmt/selection mismatch\n");
+				if (node.has_ival_uses_which()) {
+					if (node.has_subdev_frame_interval && node.has_subdev_frame_interval < 3)
+						fail("VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: try/active mismatch\n");
+					if (node.has_subdev_frame_interval &&
+					    node.has_subdev_frame_interval != node.has_subdev_fmt)
+						fail("VIDIOC_SUBDEV_G/S_FRAME_INTERVAL: fmt/frame_interval mismatch\n");
+				}
 			}
 			printf("\n");
 		}
@@ -1386,20 +1416,21 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		node.valid_buftypes = 0;
 		node.valid_memorytype = 0;
 		node.buf_caps = 0;
+		node.cur_io_caps = 0;
 		for (auto &buftype_pixfmt : node.buftype_pixfmts)
 			buftype_pixfmt.clear();
 
 		if (max_io) {
 			sprintf(suffix, " (%s %u)",
 				node.can_capture ? "Input" : "Output", io);
-			if (node.can_capture) {
+			if (node.has_inputs) {
 				struct v4l2_input descr;
 
 				doioctl(&node, VIDIOC_S_INPUT, &io);
 				descr.index = io;
 				doioctl(&node, VIDIOC_ENUMINPUT, &descr);
 				node.cur_io_caps = descr.capabilities;
-			} else {
+			} else if (node.has_outputs) {
 				struct v4l2_output descr;
 
 				doioctl(&node, VIDIOC_S_OUTPUT, &io);
@@ -1454,6 +1485,7 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		printf("Buffer ioctls%s:\n", suffix);
 		printf("\ttest VIDIOC_REQBUFS/CREATE_BUFS/QUERYBUF: %s\n", ok(testReqBufs(&node)));
 		printf("\ttest CREATE_BUFS maximum buffers: %s\n", ok(testCreateBufsMax(&node)));
+		printf("\ttest VIDIOC_REMOVE_BUFS: %s\n", ok(testRemoveBufs(&node)));
 		// Reopen after each streaming test to reset the streaming state
 		// in case of any errors in the preceeding test.
 		node.reopen();
@@ -1463,6 +1495,10 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 		printf("\ttest Requests: %s\n", ok(testRequests(&node, options[OptStreaming])));
 		if (sizeof(void *) == 4)
 			printf("\ttest TIME32/64: %s\n", ok(testTime32_64(&node)));
+		// If this is a media-centric device, then only run when streaming
+		if (!node.is_io_mc || options[OptStreaming])
+			printf("\ttest blocking wait: %s\n", ok(testBlockingWait(&node)));
+
 		// Reopen after each streaming test to reset the streaming state
 		// in case of any errors in the preceeding test.
 		node.reopen();
@@ -1501,18 +1537,27 @@ void testNode(struct node &node, struct node &node_m2m_cap, struct node &expbuf_
 			// Reopen after each streaming test to reset the streaming state
 			// in case of any errors in the preceeding test.
 			node.reopen();
-			printf("\ttest blocking wait: %s\n", ok(testBlockingWait(&node)));
-			node.reopen();
 			if (!(node.codec_mask & (STATEFUL_ENCODER | STATEFUL_DECODER))) {
-				printf("\ttest MMAP (no poll): %s\n",
-				       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_NONE)));
+				printf("\ttest MMAP (no poll, REQBUFS): %s\n",
+				       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_NONE, false)));
 				node.reopen();
 			}
-			printf("\ttest MMAP (select): %s\n",
-			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_SELECT)));
+			printf("\ttest MMAP (select, REQBUFS): %s\n",
+			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_SELECT, false)));
 			node.reopen();
-			printf("\ttest MMAP (epoll): %s\n",
-			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_EPOLL)));
+			printf("\ttest MMAP (epoll, REQBUFS): %s\n",
+			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_EPOLL, false)));
+			node.reopen();
+			if (!(node.codec_mask & (STATEFUL_ENCODER | STATEFUL_DECODER))) {
+				printf("\ttest MMAP (no poll, CREATE_BUFS): %s\n",
+				       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_NONE, true)));
+				node.reopen();
+			}
+			printf("\ttest MMAP (select, CREATE_BUFS): %s\n",
+			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_SELECT, true)));
+			node.reopen();
+			printf("\ttest MMAP (epoll, CREATE_BUFS): %s\n",
+			       ok(testMmap(&node, &node_m2m_cap, frame_count, POLL_MODE_EPOLL, true)));
 			node.reopen();
 			if (!(node.codec_mask & (STATEFUL_ENCODER | STATEFUL_DECODER))) {
 				printf("\ttest USERPTR (no poll): %s\n",

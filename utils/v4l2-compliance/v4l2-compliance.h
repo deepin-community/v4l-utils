@@ -149,6 +149,7 @@ struct base_node {
 	__u8 has_subdev_enum_fival;
 	__u8 has_subdev_fmt;
 	__u8 has_subdev_selection;
+	__u8 has_subdev_frame_interval;
 	int frame_interval_pad;
 	int enum_frame_interval_pad;
 	__u32 fbuf_caps;
@@ -188,8 +189,8 @@ public:
 	filehandles() {}
 	~filehandles()
 	{
-		for (std::set<int>::const_iterator iter = fhs.begin(); iter != fhs.end(); ++iter)
-			close(*iter);
+		for (int fh : fhs)
+			close(fh);
 	}
 
 	int add(int fd)
@@ -223,6 +224,16 @@ private:
 	do {							\
 		if (show_info)					\
 			printf("\t\tinfo: " fmt, ##args);	\
+	} while (0)
+
+#define info_once(fmt, args...)				\
+	do {						\
+		static bool show;			\
+							\
+		if (!show) {				\
+			show = true;			\
+			info(fmt, ##args);		\
+		}					\
 	} while (0)
 
 #define warn(fmt, args...) 					\
@@ -375,7 +386,7 @@ int testSubDevCap(struct node *node);
 int testSubDevEnum(struct node *node, unsigned which, unsigned pad, unsigned stream);
 int testSubDevFormat(struct node *node, unsigned which, unsigned pad, unsigned stream);
 int testSubDevSelection(struct node *node, unsigned which, unsigned pad, unsigned stream);
-int testSubDevFrameInterval(struct node *node, unsigned pad, unsigned stream);
+int testSubDevFrameInterval(struct node *node, unsigned which, unsigned pad, unsigned stream);
 int testSubDevRouting(struct node *node, unsigned which);
 
 // Buffer ioctl tests
@@ -384,6 +395,7 @@ int testReadWrite(struct node *node);
 int testExpBuf(struct node *node);
 int testBlockingWait(struct node *node);
 int testCreateBufsMax(struct node *node);
+int testRemoveBufs(struct node *node);
 
 // 32-bit architecture, 32/64-bit time_t tests
 int testTime32_64(struct node *node);
@@ -400,7 +412,7 @@ int testTime32_64(struct node *node);
  * 	use to test the loop
  */
 int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
-	     enum poll_mode pollmode);
+	     enum poll_mode pollmode, bool use_create_bufs);
 int testUserPtr(struct node *node, struct node *node_m2m_cap,
 		unsigned frame_count, enum poll_mode pollmode);
 int testDmaBuf(struct node *expbuf_node, struct node *node,

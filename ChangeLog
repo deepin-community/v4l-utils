@@ -1,21 +1,321 @@
-v4l-utils-1.26.1
+v4l-utils-1.30.1
 ----------------
 
-Hans Verkuil (2):
+Gregor Jasny (1):
+      licenses: update copyright files to remove fsf address
+
+Hans Verkuil (1):
+      v4l2-compliance: run testBlockingWait when streaming
+
+
+v4l-utils-1.30.0
+----------------
+
+Adrian Fiergolski (1):
+      media-ctl: libv4l2subdev: Add Y16 format
+
+Alexandre Courbot (1):
+      v4l2-ctl: process events before queues in stateful_m2m()
+
+Benjamin Gaignard (2):
+      v4l2-compliance: Add test for V4L2_FMTDESC_FLAG_ENUM_ALL flag
+      v4l2-ctl-vidcap: Add options to enumerate all pixel formats
+
+Dmitry Baryshkov (1):
+      edid-decode: support parsing EDID-Like Data
+
+Gregor Jasny (1):
+      buildsystem: Start v4l-utils 1.29.0 development cycle
+
+Hans Verkuil (102):
+      qvidcap: fix core dump
+      qv4l2: fix crash when disabling openGL
+      qv4l2: always set m_haveFramebufferSRGB to false
+      v4l-utils: sync with latest kernel
+      cec-ctl: add support for CEC_MSG_FL_REPLY_VENDOR_ID
+      cec-compliance: add tests for CEC_MSG_FL_REPLY_VENDOR_ID
+      contrib/test/test-media: re-add cec-compliance -A tests
+      v4l-utils: sync with latest kernel
+      v4l2-compliance: testRequests(): drop V4L2_BUF_FLAG_QUEUED check
+      contrib/test/test-media: set log level to info at end
+      v4l2-compliance: only do request-queued checks while streaming is off
+      v4l2-compliance: always test blocking wait
+      v4l-utils: sync with latest kernel
+      utils/common: add V4L2_CAP_EDID support
+      v4l2-compliance: add support for V4L2_CAP_EDID
+      test-media: move visl out of the vivid test sequence
+      contrib/test/test-media: test unbind in DQBUF
+      v4l2-ctl/compliance: add -32-time64 variants
+      test-media: add -32-time64 option
+      cec-ctl: add --test-reliability option
+      v4l-utils: sync with latest kernel
+      cec-ctl: always return in list_devices
+      cec-ctl: use -A shortcut for --list-devices
+      v4l2-ctl: list_media_devices() should show the in/out name
+      v4l2-ctl: add --list-devices-input/output options
+      v4l2-ctl: add -A as shortcut for --list-devices
+      v4l2-ctl: move s_trace back to where it was before
+      cec-follower: the short_options array was potentially too small
+      cec-compliance: the short_options array was potentially too small
+      cec-ctl: missing support for optional arguments
+      v4l2-ctl: fix --stream-out-buf-caps option
+      qv4l2/qvidcap: bind shader program in paintGL()
+      v4l2-ctl: support V4L2_CID_MIN_BUFFERS_FOR_CAPTURE/OUTPUT
+      v4l2-compliance: improve stateful codec tests
+      v4l2-compliance: improve CREATE_BUFS tests
+      cec-compliance: add fflush(stdout) in several places
+      cec-ctl: don't show legend for --stress-test-random-standby-wakeup-cycle
+      cec-ctl: clearly report PASS if a test passes
+      cec-ctl: add --physical-address (-x) option
+      v4l2-ctl: support toggling Cable Status in EDID
+      v4l-utils: update README.md
+      cec-compliance: change long timeout to 30s
+      v4l2-ctl: also report the SHA if available in --version
+      media-ctl: also report the SHA if available in --version
+      edid-decode: move edid-decode into v4l-utils
+      edid-decode: don't show parse errors if -P is given
+      test-display.py: test display CEC and EDID compliance
+      cec-ctl/edid-decode: use seconds for the reliability test
+      test-display: add cec-ddc-reliability test
+      edid-decode: suppress two more errors if -P is used
+      test_display.py: add log options, checked with linter
+      test_display.py: fix cec-stress-sleep test
+      edid-decode: hide error when using -P and -a
+      test_display.py: various fixes
+      contrib/test/test-media: add more 'date' commands
+      contrib/test/test_display.py: various improvements
+      edid-decode: support HF-EEODB when reading EDID over DDC
+      edid-decode: show timestamp for --i2c-hdcp-ri
+      edid-decode: show the delta in ms since last Ri' change
+      edid-decode: ignore failed Ri' reads
+      Revert "cec-compliance: change long timeout to 30s"
+      edid-decode: add eld.test example
+      qvidcap: add --no-loop option
+      qvidcap: add --from-frame option
+      qvidcap: update the man page
+      edid-decode: transfer characteristics improvements
+      qvidcap: allow Q to close the window with option --no-loop
+      qvidcap: 'Space' will pause, 'Backspace' will go back one frame
+      edid-decode: fix incorrect message
+      cec-compliance: add two new tests
+      v4l2-ctl: add new hdmi-4k-600mhz-with-displayid-eeodb EDID
+      edid-decode: fix DisplayID checksum regression
+      edid-decode: fix infoframe DB parsing regression
+      edid-decode: fix incorrect warning for DisplayID v1
+      edid-decode: search for 'edid-decode (hex)' first
+      cec-compliance: use CEC_MSG_FL_RAW with Unregistered
+      v4l2-tpg.patch: add define for WARN_ON_ONCE
+      v4l-utils: sync with latest media-committers git repo
+      v4l2-tracer: add V4L2_CTRL_WHICH_MIN/MAX_VAL support
+      v4l-utils: clean up printf formatting for top, left, width and height
+      v4l-utils: sync with latest media-committers git repo
+      v4l2-compliance: use geteuid instead of getuid
+      cec-compliance: use geteuid instead of getuid
+      cec-compliance: don't check UID, instead test with a <Poll>
+      edid-decode: fix wrong CTA warning if more than 1 CTA block
+      edid-decode: more warnings that only apply for the first CTA
+      cec-ctl: improve usage message
+      cec-ctl: actually parse the hpd-may-be-low suboption argument
+      cec-ctl: fail if HPD goes high unexpectedly
+      edid-decode: preparse the HDMI VSDB Image_Size
+      cec-ctl/edid-decode: fix arm architecture warnings
+      cec-follower: add support for 5V events
+      edid-decode: fail if there are no SVDs in the Data Block
+      meson.build: add -Wno-psabi to suppress arm ABI warning
+      meson.build: fix arm _TIME_BITS=64 error
+      meson.build: fix location of gconv library
+      edid-decode: improve handling of preferred/native timings
+      edid-decode: improved diagonal handling
+      test-media: add vim2m multiplanar tests
+      dvbv5-scan: color was set to white instead of resetting
+      edid-decode: more native resolution/diagonal improvements
+      edid-decode: check if NVRDB needs the size as well
+
+Laurent Pinchart (3):
+      meson: Bump minimum meson version
+      utils: media-ctl: Set V4L2_MBUS_FRAMEFMT_SET_CSC flag to set colorspace
+      v4l2-compliance: Don't perform blocking DQBUF test on MC_IO devices
+
+Maciej Miszczyk (12):
+      edid-decode: fix transfer characteristics buffer overread
+      edid-decode: avoid infinite loop in transfer characteristics
+      edid-decode: fix a transfer characteristics buffer overread
+      edid-decode: fix buffer overread in infoframe parsing
+      edid-decode: fix buffer overread on CTA block parsing
+      edid-decode: fix buffer overread on displayid block parsing
+      edid-decode: fix buffer overread on product identification parsing
+      edid-decode: fix buffer overread while parsing Stereo Display Interface DB
+      edid-decode: size colorspace_eotf_combinations array correctly
+      edid-decode: fix divide by zero in type17 timings parsing
+      edid-decode: fix divide by zero in type3 timings parsing
+      edid-decode: fix heap overread on early EOF
+
+Michal Rostecki (1):
+      libv4l2: Guard the v4l2_ioctl function with HAVE_POSIX_IOCTL
+
+Ming Qian (1):
+      v4l-utils: Ignore comma in bracket when getting subopt
+
+Peter Seiderer (2):
+      libv4lconvert: fix jpeg-v9x/gcc-14.x compile (jpeg_mem_dest argument mismatch)
+      meson: remove two pre-0.60 workarounds
+
+Ricardo Ribalda (6):
+      media-ctl: Remove duplicated include
+      Android.mk: Remove obsolete build files
+      v4l2-compliance: Do not run test requiring pthread_cancel in Android
+      v4l2-compliance: Fix build error clang TOT
+      android: Remove unused file
+      contrib/test/test-media: Increase modprobe time
+
+Rosen Penev (1):
+      v4l-utils: fix compilation with external intl
+
+Simon Ser (1):
+      edid-decode: use override_find_program() to ease subproject use
+
+Yunke Cao (2):
+      v4l2-ctl: Support V4L2_CTRL_TYPE_RECT
+      v4l2-utils: Support V4L2_CTRL_WHICH_MIN/MAX_VAL
+
+
+v4l-utils-1.28.0
+----------------
+
+Akihiro Tsukada (2):
+      v4l-utils/contrib/gconv: translation table fix for ARIB-STD-B24
+      v4l-utils/contrib/gconv: fix conversion errors on ARIB-STD-B24 strings
+
+Benjamin Gaignard (1):
+      v4l2-compliance: Add a test for REMOVE_BUFS ioctl
+
+Daniel Scally (2):
+      v4l2-ctl: Add --try-routing option
+      media-ctl: Re-order setting format and routes
+
+Deborah Brouwer (10):
+      v4l2-tracer: autogenerate files that can be added to git
+      v4l2-tracer: add auto-generated files to git repo
+      v4l2-tracer: stop auto-generating files with meson
+      sync-with-kernel.sh: create v4l2-tracer patches
+      v4l2-tracer: look in more places for libv4l2tracer
+      v4l2-tracer: ignore single line comments when parsing headers
+      v4l2-tracer: add re/tracing for MAX_NUM_BUFFERS
+      v4l2-tracer: add re/tracing for AV1 controls
+      v4l2-tracer: stop waiting to handle a signal
+      v4l2-tracer: use stat to verify that retrace file exists
+
+Detlev Casanova (1):
+      test-media: Add basic tests for visl
+
+Fabio Estevam (1):
+      keytable: meson: Restrict the installation of 50-rc_keymap.conf
+
+Gregor Jasny (1):
+      buildsystem: Start v4l-utils 1.27.0 development cycle
+
+Hans Verkuil (38):
       cec-ctl: fix random cec stress test: check if msg status is OK
       libv4l2rds: fix TMC location parsing
+      v4l-utils: v4l-utils: sync with latest kernel headers
+      v4l-utils: fix @PACKAGE_VERSION@ use
+      v4l-utils: v4l-utils: sync with latest kernel headers
+      *v4l-helpers: support V4L2_SUBDEV_CLIENT_CAP_INTERVAL_USES_WHICH
+      v4l2-ctl: add support for V4L2_SUBDEV_CLIENT_CAP_INTERVAL_USES_WHICH
+      v4l2-compliance: add support for V4L2_SUBDEV_CLIENT_CAP_INTERVAL_USES_WHICH
+      v4l2-ctl/compliance: read and show the subdev client capabilities
+      qv4l2: support menu controls in updateCtrlRange()
+      v4l2-ctl: report max_num_buffers
+      meson.build: dep_systemd was not set in one case
+      cv4l-helpers.h: add missing helper functions
+      v4l2-ctl: replace --fix-edid-checksums by --keep-edid-checksums
+      cec-compliance: add --show-timestamp option
+      v4l-utils: (c)v4l-helpers.h: support more than 32 buffers
+      cec-ctl: avoid confusing error message
+      v4l-utils: sync-with-kernel
+      v4l-utils: sync-with-kernel
+      qv4l2: add support for /dev/v4l-touchX devices
+      qv4l2: fix crash when used with metadata output devices
+      cec-ctl: exit after reporting all cec devices with --list-devices
+      v4l2-ctl: --list-devices --verbose will list current input/output
+      sync-with-kernel.sh: filter V4L2_META_FMT_GENERIC_ defines
+      v4l-utils: sync-with-kernel
+      v4l2-info: support V4L2_FMT_FLAG_META_LINE_BASED
+      sync-with-kernel.sh: add v4l2-dv-timings.h
+      v4l2-compliance: do not warn for unexpected vivid_ro_ctrl values
+      v4l-utils: test-media: add dmesg -n info before modprobes
+      v4l-helpers: v4l_format_s_sizeimage: add support for other buftypes
+      v4l2-compliance: matchFormats(): add multiplane logging
+      v4l2-compliance: add new CREATE_BUFS tests
+      v4l2-compliance: clarify a create_bufs test
+      v4l-utils: test-media: connect the hdmi input to the output
+      v4l-utils: sync with latest kernel
+      utils/keytable: forgot to add mygica_utv3.toml
+      v4l2-info: add support for V4L2_BUF_CAP_SUPPORTS_REMOVE_BUFS
+      cec-follower: change type of struct Timer duration field to int
 
-Peter Seiderer (3):
+James Le Cuirot (3):
+      meson: Fix building with -Dv4l-utils=false
+      meson: Allow documentation directory to be specified with -Ddocdir
+      v4l2-compliance: Fix building against libc++
+
+Laurent Pinchart (7):
+      v4l2gl: Add missing dependency on argp
+      v4l2-compliance: Constify pointers and references in formats tests
+      v4l2-compliance: Support the changed routing API
+      v4l2-compliance: Add tests for V4L2_FMT_FLAG_META_LINE_BASED flag
+      libv4l2subdev: Extend API with 'which' argument where missing
+      utils: media-ctl: Prepare for TRY state support
+      utils: media-ctl: Support accessing the subdev TRY state
+
+Martin Tůma (1):
+      Fixed qv4l2 crash with drivers that implement VIDIOC_ENUM_FRAMESIZES for outputs
+
+Matthias Reichl (1):
+      keytable: fix segfault when reading legacy keymaps
+
+Nicolas Dufresne (1):
+      v4l2-tracer: Rewrite libv4l2tracer.so lookup
+
+Peter Seiderer (6):
+      meson: add optional Qt6 support
       media-info: add missing sys/stat.h include (for dev_t)
       meson: fix has_function fork detection (needs suitable include)
+      meson: v4l2grab needs libv4lconvert with fork support enabled
+      Revert "meson: v4l2grab needs libv4lconvert with fork support enabled"
       meson: libv4lconvert helpers need fork support
+
+Rosen Penev (6):
+      v4l-utils: fix formats under alpha/ppc64/mips64
+      v4l-utils: use 64-bit off_t format
+      v4l-utils: clang-tidy: convert to for range loop
+      v4l-utils: clang-tidy: use auto with iterators
+      v4l-utils: fix potential crashing with 32-bit musl
+      v4l-utils: use 64-bit formats for time
 
 Rudi Heitbaum (1):
       keytable: meson not passing rc_keymaps system directory
 
-Sean Young (2):
+Sakari Ailus (2):
+      utils: media-ctl: Print the MUST_CONNECT pad flag
+      utils: media-ctl: Support changed routing API
+
+Sean Young (7):
       ir-ctl: remove line length limits
       keytable: remove line length limits
+      ir-ctl: correct max_size for rc5 and rc5_sz
+      ir-ctl: encode rc6 mode 0 can have 43 edges
+      ir-ctl: add optional header to manchester encoding
+      ir-ctl: fix encoding pulse_length bpf encoder
+      keytable: fix command line processing
+
+Tomi Valkeinen (2):
+      v4l2-compliance: Fix use of routing on 32-bit platforms
+      v4l2-compliance: Fix streams use in testSubDevEnumFrameSize()
+
+Vince Ricosti (2):
+      ir-ctl: clear errno before strtol
+      keytable: fix stdout/stderr inconsistency
 
 
 v4l-utils-1.26.0

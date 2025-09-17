@@ -92,8 +92,7 @@ void add_fd(int fd_trace, int fd_retrace)
 int get_fd_retrace_from_fd_trace(int fd_trace)
 {
 	int fd_retrace = -1;
-	std::unordered_map<int, int>::const_iterator it;
-	it = ctx_retrace.retrace_fds.find(fd_trace);
+	auto it = ctx_retrace.retrace_fds.find(fd_trace);
 	if (it != ctx_retrace.retrace_fds.end())
 		fd_retrace = it->second;
 	return fd_retrace;
@@ -103,8 +102,8 @@ void print_fds(void)
 {
 	if (ctx_retrace.retrace_fds.empty())
 		fprintf(stderr, "all devices closed\n");
-	for (auto it = ctx_retrace.retrace_fds.cbegin(); it != ctx_retrace.retrace_fds.cend(); ++it)
-		fprintf(stderr, "fd_trace: %d, fd_retrace: %d\n", it->first, it->second);
+	for (auto retrace_fd : ctx_retrace.retrace_fds)
+		fprintf(stderr, "fd_trace: %d, fd_retrace: %d\n", retrace_fd.first, retrace_fd.second);
 }
 
 std::string get_path_retrace_from_path_trace(std::string path_trace, json_object *open_obj)

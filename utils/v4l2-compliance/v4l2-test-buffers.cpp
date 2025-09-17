@@ -529,6 +529,124 @@ static int testCanSetSameTimings(struct node *node)
 	return 0;
 }
 
+int testRemoveBufs(struct node *node)
+{
+	int ret;
+	unsigned i;
+
+	node->reopen();
+
+	for (i = 1; i <= V4L2_BUF_TYPE_LAST; i++) {
+		struct v4l2_remove_buffers removebufs = { };
+		unsigned buffers;
+
+		if (!(node->valid_buftypes & (1 << i)))
+			continue;
+
+		cv4l_queue q(i, V4L2_MEMORY_MMAP);
+
+		if (testSetupVbi(node, i))
+			continue;
+		ret = q.remove_bufs(node, 0, 0);
+		if (ret == ENOTTY)
+			continue;
+
+		q.init(i, V4L2_MEMORY_MMAP);
+		ret = q.create_bufs(node, 0);
+
+		memset(&removebufs, 0xff, sizeof(removebufs));
+		removebufs.index = 0;
+		removebufs.count = 0;
+		removebufs.type = q.g_type();
+		fail_on_test(doioctl(node, VIDIOC_REMOVE_BUFS, &removebufs));
+		fail_on_test(check_0(removebufs.reserved, sizeof(removebufs.reserved)));
+
+		buffer buf(i);
+
+		/* Create only 1 buffer */
+		fail_on_test(q.create_bufs(node, 1));
+		buffers = q.g_buffers();
+		fail_on_test(buffers != 1);
+		/* Removing buffer index 1 must fail */
+		fail_on_test(q.remove_bufs(node, 1, buffers) != EINVAL);
+		/* Removing buffer index 0 is valid */
+		fail_on_test(q.remove_bufs(node, 0, buffers));
+		/* Removing buffer index 0 again must fail */
+		fail_on_test(q.remove_bufs(node, 0, 1) != EINVAL);
+		/* Create 3 buffers indexes 0 to 2 */
+		fail_on_test(q.create_bufs(node, 3));
+		/* Remove them one by one */
+		fail_on_test(q.remove_bufs(node, 2, 1));
+		fail_on_test(q.remove_bufs(node, 0, 1));
+		fail_on_test(q.remove_bufs(node, 1, 1));
+		/* Removing buffer index 0 again must fail */
+		fail_on_test(q.remove_bufs(node, 0, 1) != EINVAL);
+
+		/* Create 4 buffers indexes 0 to 3 */
+		fail_on_test(q.create_bufs(node, 4));
+		/* Remove buffers index 1 and 2 */
+		fail_on_test(q.remove_bufs(node, 1, 2));
+		/* Add 3 more buffers should be indexes 4 to 6 */
+		fail_on_test(q.create_bufs(node, 3));
+		/* Query buffers:
+		 * 1 and 2 have been removed they must fail
+		 * 0 and 3 to 6 must exist*/
+		fail_on_test(buf.querybuf(node, 0));
+		fail_on_test(buf.querybuf(node, 1) != EINVAL);
+		fail_on_test(buf.querybuf(node, 2) != EINVAL);
+		fail_on_test(buf.querybuf(node, 3));
+		fail_on_test(buf.querybuf(node, 4));
+		fail_on_test(buf.querybuf(node, 5));
+		fail_on_test(buf.querybuf(node, 6));
+
+		/* Remove existing buffer index 6 with bad type must fail */
+		memset(&removebufs, 0xff, sizeof(removebufs));
+		removebufs.index = 6;
+		removebufs.count = 1;
+		removebufs.type = 0;
+		fail_on_test(doioctl(node, VIDIOC_REMOVE_BUFS, &removebufs) != EINVAL);
+
+		/* Remove existing buffer index 6 with bad type and count == 0
+		 * must fail */
+		memset(&removebufs, 0xff, sizeof(removebufs));
+		removebufs.index = 6;
+		removebufs.count = 0;
+		removebufs.type = 0;
+		fail_on_test(doioctl(node, VIDIOC_REMOVE_BUFS, &removebufs) != EINVAL);
+
+		/* Remove with count == 0 must always return 0 */
+		fail_on_test(q.remove_bufs(node, 0, 0));
+		fail_on_test(q.remove_bufs(node, 1, 0));
+		fail_on_test(q.remove_bufs(node, 6, 0));
+		fail_on_test(q.remove_bufs(node, 7, 0));
+		fail_on_test(q.remove_bufs(node, 0xffffffff, 0));
+
+		/* Remove crossing max allowed buffers boundary must fail */
+		fail_on_test(q.remove_bufs(node, q.g_max_num_buffers() - 2, 7) != EINVAL);
+
+		/* Remove overflow must fail */
+		fail_on_test(q.remove_bufs(node, 3, 0xfffffff) != EINVAL);
+
+		/* Remove 2 buffers on index 2 when index 2 is free must fail */
+		fail_on_test(q.remove_bufs(node, 2, 2) != EINVAL);
+
+		/* Remove 2 buffers on index 0 when index 1 is free must fail */
+		fail_on_test(q.remove_bufs(node, 0, 2) != EINVAL);
+
+		/* Remove 2 buffers on index 1 when index 1 and 2 are free must fail */
+		fail_on_test(q.remove_bufs(node, 1, 2) != EINVAL);
+
+		/* Create 2 buffers, that must fill the hole */
+		fail_on_test(q.create_bufs(node, 2));
+		/* Remove all buffers */
+		fail_on_test(q.remove_bufs(node, 0, 7));
+
+		fail_on_test(q.reqbufs(node, 0));
+	}
+
+	return 0;
+}
+
 int testReqBufs(struct node *node)
 {
 	struct v4l2_create_buffers crbufs = { };
@@ -553,6 +671,8 @@ int testReqBufs(struct node *node)
 	fail_on_test_val(ret != EINVAL, ret);
 	fail_on_test(node->node2 == nullptr);
 	for (i = 1; i <= V4L2_BUF_TYPE_LAST; i++) {
+		bool is_vbi_raw = (i == V4L2_BUF_TYPE_VBI_CAPTURE ||
+				   i == V4L2_BUF_TYPE_VBI_OUTPUT);
 		bool is_overlay = v4l_type_is_overlay(i);
 		__u32 caps = 0;
 
@@ -736,25 +856,97 @@ int testReqBufs(struct node *node)
 				fail_on_test(q2.create_bufs(node->node2, 1) != EBUSY);
 			q.reqbufs(node);
 
-			if (node->is_video) {
-				cv4l_fmt fmt;
+			cv4l_fmt fmt;
 
+			node->g_fmt(fmt, q.g_type());
+			if (V4L2_TYPE_IS_MULTIPLANAR(q.g_type())) {
+				// num_planes == 0 is not allowed
+				fmt.s_num_planes(0);
+				fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
 				node->g_fmt(fmt, q.g_type());
-				if (V4L2_TYPE_IS_MULTIPLANAR(q.g_type())) {
-					fmt.s_num_planes(fmt.g_num_planes() + 1);
+
+				if (fmt.g_num_planes() > 1) {
+					// fewer planes than required by the format
+					// is not allowed
+					fmt.s_num_planes(fmt.g_num_planes() - 1);
+					fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+					node->g_fmt(fmt, q.g_type());
+
+					// A last plane with a 0 sizeimage is not allowed
+					fmt.s_sizeimage(0, fmt.g_num_planes() - 1);
 					fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
 					node->g_fmt(fmt, q.g_type());
 				}
-				fmt.s_height(fmt.g_height() / 2);
-				for (unsigned p = 0; p < fmt.g_num_planes(); p++)
-					fmt.s_sizeimage(fmt.g_sizeimage(p) / 2, p);
-				fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
-				fail_on_test(testQueryBuf(node, fmt.type, q.g_buffers()));
-				node->g_fmt(fmt, q.g_type());
-				for (unsigned p = 0; p < fmt.g_num_planes(); p++)
-					fmt.s_sizeimage(fmt.g_sizeimage(p) * 2, p);
-				fail_on_test(q.create_bufs(node, 1, &fmt));
+
+				if (fmt.g_num_planes() < VIDEO_MAX_PLANES) {
+					// Add an extra plane, but with size 0. The vb2
+					// framework should test for this.
+					fmt.s_num_planes(fmt.g_num_planes() + 1);
+					fmt.s_sizeimage(0, fmt.g_num_planes() - 1);
+					fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+					node->g_fmt(fmt, q.g_type());
+
+					// This test is debatable: should we allow CREATE_BUFS
+					// to create buffers with more planes than required
+					// by the format?
+					//
+					// For now disallow this. If there is a really good
+					// reason for allowing this, then that should be
+					// documented and carefully tested.
+					//
+					// It is the driver in queue_setup that has to check
+					// this.
+					fmt.s_num_planes(fmt.g_num_planes() + 1);
+					fmt.s_sizeimage(65536, fmt.g_num_planes() - 1);
+					fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+					node->g_fmt(fmt, q.g_type());
+				}
 			}
+			if (is_vbi_raw) {
+				fmt.fmt.vbi.count[0] = 0;
+				fmt.fmt.vbi.count[1] = 0;
+			} else {
+				fmt.s_sizeimage(0, 0);
+			}
+			// zero size for the first plane is not allowed
+			fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+			node->g_fmt(fmt, q.g_type());
+
+			// plane sizes that are too small are not allowed
+			for (unsigned p = 0; p < fmt.g_num_planes(); p++) {
+				if (is_vbi_raw) {
+					fmt.fmt.vbi.count[0] /= 2;
+					fmt.fmt.vbi.count[1] /= 2;
+				} else {
+					fmt.s_sizeimage(fmt.g_sizeimage(p) / 2, p);
+				}
+			}
+			fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+			fail_on_test(testQueryBuf(node, fmt.type, q.g_buffers()));
+			node->g_fmt(fmt, q.g_type());
+
+			// Add 1 MB to each plane or double the vbi counts.
+			// This is allowed.
+			for (unsigned p = 0; p < fmt.g_num_planes(); p++) {
+				if (is_vbi_raw) {
+					fmt.fmt.vbi.count[0] *= 2;
+					fmt.fmt.vbi.count[1] *= 2;
+				} else {
+					fmt.s_sizeimage(fmt.g_sizeimage(p) + (1 << 20), p);
+				}
+			}
+			fail_on_test(q.create_bufs(node, 1, &fmt));
+			buffer buf(q);
+
+			// Check that the new buffer lengths are at least those of
+			// the large sizes as specified by CREATE_BUFS
+			fail_on_test(buf.querybuf(node, 0));
+			fail_on_test(buf.g_num_planes() != fmt.g_num_planes());
+			// Verify that the new buffers actually have the requested
+			// buffer size
+			for (unsigned p = 0; p < buf.g_num_planes(); p++)
+				fail_on_test(buf.g_length(p) < fmt.g_sizeimage(p));
+			node->g_fmt(fmt, q.g_type());
 		}
 		fail_on_test(q.reqbufs(node));
 	}
@@ -877,11 +1069,22 @@ int testReadWrite(struct node *node)
 
 static int setupM2M(struct node *node, cv4l_queue &q, bool init = true)
 {
+	unsigned buffers = 2;
 	__u32 caps;
 
 	last_m2m_seq.init();
 
-	fail_on_test(q.reqbufs(node, 2));
+	if (node->codec_mask & STATEFUL_DECODER) {
+		struct v4l2_control ctrl = {
+			.id = V4L2_CID_MIN_BUFFERS_FOR_CAPTURE,
+		};
+		fail_on_test(node->g_ctrl(ctrl));
+		fail_on_test(ctrl.value <= 0);
+		buffers = ctrl.value;
+		fail_on_test(q.reqbufs(node, 1));
+		fail_on_test((unsigned)ctrl.value < q.g_buffers());
+	}
+	fail_on_test(q.reqbufs(node, buffers));
 	fail_on_test(q.mmap_bufs(node));
 	caps = q.g_capabilities();
 	fail_on_test(node->supports_orphaned_bufs ^ !!(caps & V4L2_BUF_CAP_SUPPORTS_ORPHANED_BUFS));
@@ -1338,7 +1541,7 @@ static int setupMmap(struct node *node, cv4l_queue &q)
 }
 
 int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
-	     enum poll_mode pollmode)
+	     enum poll_mode pollmode, bool use_create_bufs)
 {
 	bool can_stream = node->g_caps() & V4L2_CAP_STREAMING;
 	bool have_createbufs = true;
@@ -1350,6 +1553,8 @@ int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
 
 	buffer_info.clear();
 	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		unsigned reqbufs_buf_count;
+		unsigned buffers = 2;
 		cv4l_fmt fmt;
 
 		if (!(node->valid_buftypes & (1 << type)))
@@ -1378,7 +1583,20 @@ int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
 		fail_on_test(node->streamoff(q.g_type()));
 
 		q.init(type, V4L2_MEMORY_MMAP);
-		fail_on_test(q.reqbufs(node, 2));
+
+		if (node->is_m2m && (node->codec_mask & STATEFUL_ENCODER)) {
+			struct v4l2_control ctrl = {
+				.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT,
+			};
+
+			fail_on_test(node->g_ctrl(ctrl));
+			fail_on_test(ctrl.value <= 0);
+			buffers = ctrl.value;
+			fail_on_test(q.reqbufs(node, 1));
+			fail_on_test((unsigned)ctrl.value < q.g_buffers());
+		}
+		fail_on_test(q.reqbufs(node, buffers));
+		reqbufs_buf_count = q.g_buffers();
 		fail_on_test(node->streamoff(q.g_type()));
 		last_seq.init();
 
@@ -1411,14 +1629,17 @@ int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
 
 		ret = q.create_bufs(node, 0);
 		fail_on_test_val(ret != ENOTTY && ret != 0, ret);
-		if (ret == ENOTTY)
+		if (ret == ENOTTY) {
 			have_createbufs = false;
+			if (use_create_bufs)
+				return ENOTTY;
+		}
 		if (have_createbufs) {
 			q.reqbufs(node);
 			q.create_bufs(node, 2, &cur_fmt, V4L2_MEMORY_FLAG_NON_COHERENT);
 			fail_on_test(setupMmap(node, q));
 			q.munmap_bufs(node);
-			q.reqbufs(node, 2);
+			q.reqbufs(node, buffers);
 
 			cv4l_fmt fmt(cur_fmt);
 
@@ -1429,9 +1650,13 @@ int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
 					fmt.s_sizeimage(fmt.g_sizeimage(p) / 2, p);
 				fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
 				fail_on_test(testQueryBuf(node, cur_fmt.type, q.g_buffers()));
+				q.reqbufs(node);
+				fail_on_test(q.create_bufs(node, 1, &fmt) != EINVAL);
+				fail_on_test(testQueryBuf(node, cur_fmt.type, q.g_buffers()));
 				fmt = cur_fmt;
 				for (unsigned p = 0; p < fmt.g_num_planes(); p++)
 					fmt.s_sizeimage(fmt.g_sizeimage(p) * 2, p);
+				q.reqbufs(node, buffers);
 			}
 			fail_on_test(q.create_bufs(node, 1, &fmt));
 			if (node->is_video) {
@@ -1441,7 +1666,30 @@ int testMmap(struct node *node, struct node *node_m2m_cap, unsigned frame_count,
 				for (unsigned p = 0; p < fmt.g_num_planes(); p++)
 					fail_on_test(buf.g_length(p) < fmt.g_sizeimage(p));
 			}
-			fail_on_test(q.reqbufs(node, 2));
+			fail_on_test(q.reqbufs(node));
+			if (use_create_bufs) {
+				fmt = cur_fmt;
+				if (node->is_video)
+					for (unsigned p = 0; p < fmt.g_num_planes(); p++)
+						fmt.s_sizeimage(fmt.g_sizeimage(p) + 10240, p);
+				q.create_bufs(node, reqbufs_buf_count - 1, &fmt);
+				q.create_bufs(node, 1, &fmt);
+				fail_on_test(q.g_buffers() != reqbufs_buf_count);
+				if (node->is_video) {
+					for (unsigned b = 0; b < q.g_buffers(); b++) {
+						buffer buf(q);
+
+						fail_on_test(buf.querybuf(node, b));
+						for (unsigned p = 0; p < fmt.g_num_planes(); p++)
+							fail_on_test(buf.g_length(p) != fmt.g_sizeimage(p));
+					}
+				}
+				fail_on_test(q.reqbufs(node));
+				q.create_bufs(node, reqbufs_buf_count, &cur_fmt);
+				fail_on_test(q.g_buffers() != reqbufs_buf_count);
+			} else {
+				fail_on_test(q.reqbufs(node, reqbufs_buf_count));
+			}
 		}
 		if (v4l_type_is_output(type))
 			stream_for_fmt(cur_fmt.g_pixelformat());
@@ -2050,7 +2298,6 @@ int testRequests(struct node *node, bool test_streaming)
 	filehandles fhs;
 	int media_fd = fhs.add(mi_get_media_fd(node->g_fd(), node->bus_info));
 	int req_fd;
-	qctrl_map::iterator iter;
 	struct test_query_ext_ctrl valid_qctrl;
 	v4l2_ext_controls ctrls;
 	v4l2_ext_control ctrl;
@@ -2110,8 +2357,8 @@ int testRequests(struct node *node, bool test_streaming)
 	memset(&valid_qctrl, 0, sizeof(valid_qctrl));
 	memset(&ctrls, 0, sizeof(ctrls));
 	memset(&ctrl, 0, sizeof(ctrl));
-	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
-		test_query_ext_ctrl &qctrl = iter->second;
+	for (auto &control : node->controls) {
+		test_query_ext_ctrl &qctrl = control.second;
 
 		if (qctrl.type != V4L2_CTRL_TYPE_INTEGER &&
 		    qctrl.type != V4L2_CTRL_TYPE_BOOLEAN)
@@ -2508,14 +2755,16 @@ int testRequests(struct node *node, bool test_streaming)
 			break;
 		}
 		fail_on_test_val(ret, ret);
-		fail_on_test(buf.querybuf(node, i));
-		// Check that the buffer is now queued up
-		fail_on_test(buf.g_flags() & V4L2_BUF_FLAG_IN_REQUEST);
-		fail_on_test(!(buf.g_flags() & V4L2_BUF_FLAG_REQUEST_FD));
-		fail_on_test(!(buf.g_flags() & V4L2_BUF_FLAG_QUEUED));
-		// Re-initing or requeuing the request is no longer possible
-		fail_on_test(doioctl_fd(buf_req_fds[i], MEDIA_REQUEST_IOC_REINIT, nullptr) != EBUSY);
-		fail_on_test(doioctl_fd(buf_req_fds[i], MEDIA_REQUEST_IOC_QUEUE, nullptr) != EBUSY);
+		if (i < min_bufs) {
+			fail_on_test(buf.querybuf(node, i));
+			// Check that the buffer is now queued up (i.e. no longer 'IN_REQUEST')
+			fail_on_test(buf.g_flags() & V4L2_BUF_FLAG_IN_REQUEST);
+			fail_on_test(!(buf.g_flags() & V4L2_BUF_FLAG_REQUEST_FD));
+			fail_on_test(!(buf.g_flags() & V4L2_BUF_FLAG_QUEUED));
+			// Re-initing or requeuing the request is no longer possible
+			fail_on_test(doioctl_fd(buf_req_fds[i], MEDIA_REQUEST_IOC_REINIT, nullptr) != EBUSY);
+			fail_on_test(doioctl_fd(buf_req_fds[i], MEDIA_REQUEST_IOC_QUEUE, nullptr) != EBUSY);
+		}
 		if (i >= min_bufs) {
 			// Close some of the request fds to check that this
 			// is safe to do
@@ -2572,9 +2821,12 @@ int testRequests(struct node *node, bool test_streaming)
 			// (sequence number & 0xff).
 			vivid_ro_ctrls.request_fd = buf_req_fds[i];
 			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_ro_ctrls));
+			// FIXME: due to unreliable sequence counters from vivid this
+			// test fails regularly. For now replace the 'warn_once' by
+			// 'info_once' until vivid is fixed.
 			if (node->is_video && !node->can_output &&
 			    vivid_ro_ctrl.value != (int)i)
-				warn_once("vivid_ro_ctrl.value (%d) != i (%u)\n",
+				info_once("vivid_ro_ctrl.value (%d) != i (%u)\n",
 					  vivid_ro_ctrl.value, i);
 
 			// Check that the dynamic control array is set as
@@ -2650,9 +2902,12 @@ int testRequests(struct node *node, bool test_streaming)
 			// For vivid check the final read-only value,
 			vivid_ro_ctrls.which = 0;
 			fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &vivid_ro_ctrls));
+			// FIXME: due to unreliable sequence counters from vivid this
+			// test fails regularly. For now replace the 'warn' by 'info'
+			// until vivid is fixed.
 			if (node->is_video && !node->can_output &&
 			    vivid_ro_ctrl.value != (int)(num_bufs - 1))
-				warn("vivid_ro_ctrl.value (%d) != num_bufs - 1 (%d)\n",
+				info("vivid_ro_ctrl.value (%d) != num_bufs - 1 (%d)\n",
 				     vivid_ro_ctrl.value, num_bufs - 1);
 
 			// the final dynamic array value,
@@ -2695,6 +2950,8 @@ int testRequests(struct node *node, bool test_streaming)
 	return 0;
 }
 
+/* Android does not have support for pthread_cancel */
+#ifndef ANDROID
 
 /*
  * This class wraps a pthread in such a way that it simplifies passing
@@ -2831,6 +3088,9 @@ static int testBlockingDQBuf(struct node *node, cv4l_queue &q)
 	/*
 	 * This test checks if a blocking wait in VIDIOC_DQBUF doesn't block
 	 * other ioctls.
+	 *
+	 * If this fails, check that the vb2_ops wait_prepare/finish callbacks
+	 * are set.
 	 */
 	fflush(stdout);
 	thread_dqbuf.start();
@@ -2851,6 +3111,8 @@ static int testBlockingDQBuf(struct node *node, cv4l_queue &q)
 	fail_on_test(q.reqbufs(node, 0));
 	return 0;
 }
+
+#endif //ANDROID
 
 int testBlockingWait(struct node *node)
 {
@@ -2873,9 +3135,11 @@ int testBlockingWait(struct node *node)
 		if (testSetupVbi(node, type))
 			continue;
 
+#ifndef ANDROID
 		fail_on_test(testBlockingDQBuf(node, q));
 		if (node->is_m2m)
 			fail_on_test(testBlockingDQBuf(node, m2m_q));
+#endif
 	}
 	return 0;
 }
@@ -3112,15 +3376,15 @@ static void streamFmtRun(struct node *node, cv4l_fmt &fmt, unsigned frame_count,
 
 	if (has_crop) {
 		node->g_frame_selection(crop, fmt.g_field());
-		sprintf(s_crop, "Crop %ux%u@%ux%u, ",
-				crop.r.width, crop.r.height,
-				crop.r.left, crop.r.top);
+		sprintf(s_crop, "Crop (%d,%d)/%ux%u, ",
+				crop.r.left, crop.r.top,
+				crop.r.width, crop.r.height);
 	}
 	if (has_compose) {
 		node->g_frame_selection(compose, fmt.g_field());
-		sprintf(s_compose, "Compose %ux%u@%ux%u, ",
-				compose.r.width, compose.r.height,
-				compose.r.left, compose.r.top);
+		sprintf(s_compose, "Compose (%d,%d)/%ux%u, ",
+				compose.r.left, compose.r.top,
+				compose.r.width, compose.r.height);
 	}
 	printf("\r\t\t%s%sStride %u, Field %s%s: %s   \n",
 			s_crop, s_compose,
@@ -3465,14 +3729,14 @@ static void streamM2MRun(struct node *node, unsigned frame_count)
 	node->g_fmt(out_fmt, out_type);
 	if (!no_progress)
 		printf("\r");
-	printf("\t%s (%s) %dx%d -> %s (%s) %dx%d: %s\n",
+	printf("\t%s (%s) %ux%u -> %s (%s) %ux%u: %s\n",
 	       fcc2s(out_fmt.g_pixelformat()).c_str(),
 	       pixfmt2s(out_fmt.g_pixelformat()).c_str(),
 	       out_fmt.g_width(), out_fmt.g_height(),
 	       fcc2s(cap_fmt.g_pixelformat()).c_str(),
 	       pixfmt2s(cap_fmt.g_pixelformat()).c_str(),
 	       cap_fmt.g_width(), cap_fmt.g_height(),
-	       ok(testMmap(node, node, frame_count, POLL_MODE_SELECT)));
+	       ok(testMmap(node, node, frame_count, POLL_MODE_SELECT, false)));
 }
 
 static int streamM2MOutFormat(struct node *node, __u32 pixelformat, __u32 w, __u32 h,

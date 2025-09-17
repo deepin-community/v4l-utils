@@ -28,7 +28,6 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <v4l2subdev.h>
 
 #include <linux/media.h>
 #include <linux/videodev2.h>
@@ -40,6 +39,7 @@
 
 struct media_options media_opts = {
 	.devname = MEDIA_DEVNAME_DEFAULT,
+	.which = V4L2_SUBDEV_FORMAT_ACTIVE,
 };
 
 static void print_version()
@@ -47,6 +47,9 @@ static void print_version()
 #define STR(x) #x
 #define STRING(x) STR(x)
 	printf("media-ctl %s%s\n", PACKAGE_VERSION, STRING(GIT_COMMIT_CNT));
+	if (strlen(STRING(GIT_SHA)))
+		printf("media-ctl SHA: %s %s\n",
+		       STRING(GIT_SHA), STRING(GIT_COMMIT_DATE));
 }
 
 static void usage(const char *argv0)
@@ -75,6 +78,7 @@ static void usage(const char *argv0)
 	printf("-r, --reset		Reset all links to inactive\n");
 	printf("-v, --verbose		Be verbose\n");
 	printf("    --version		Show version information\n");
+	printf("-W, --which which	Select the subdev state to operate on\n");
 	printf("\n");
 	printf("Links and formats are defined as\n");
 	printf("\tlinks           = link { ',' link } ;\n");
@@ -140,6 +144,8 @@ static void usage(const char *argv0)
 	for (i = V4L2_YCBCR_ENC_DEFAULT; i <= V4L2_YCBCR_ENC_SMPTE240M; i++)
 		printf("\t                %s\n",
 		       v4l2_subdev_ycbcr_encoding_to_string(i));
+
+	printf("\twhich           Subdev state ('active' or 'try')\n");
 }
 
 #define OPT_PRINT_DOT			256
@@ -168,6 +174,7 @@ static struct option opts[] = {
 	{"reset", 0, 0, 'r'},
 	{"verbose", 0, 0, 'v'},
 	{"version", 0, 0, OPT_VERSION},
+	{"which", 1, 0, 'W'},
 	{ },
 };
 
@@ -244,7 +251,7 @@ int parse_cmdline(int argc, char **argv)
 	}
 
 	/* parse options */
-	while ((opt = getopt_long(argc, argv, "d:e:f:hil:prvV:R:",
+	while ((opt = getopt_long(argc, argv, "d:e:f:hil:prvV:R:W:",
 				  opts, NULL)) != -1) {
 		switch (opt) {
 		case 'd':
@@ -292,6 +299,17 @@ int parse_cmdline(int argc, char **argv)
 
 		case 'R':
 			media_opts.routes = optarg;
+			break;
+
+		case 'W':
+			if (!strcmp(optarg, "active"))
+				media_opts.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+			else if (!strcmp(optarg, "try"))
+				media_opts.which = V4L2_SUBDEV_FORMAT_TRY;
+			else {
+				printf("Invalid 'which' value '%s'\n", optarg);
+				return 1;
+			}
 			break;
 
 		case OPT_PRINT_DOT:

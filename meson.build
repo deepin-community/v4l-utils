@@ -1,6 +1,6 @@
 project('v4l-utils', 'c', 'cpp',
-    version: '1.26.1',
-    meson_version : '>= 0.54',
+    version: '1.30.1',
+    meson_version : '>= 0.60',
     default_options : [
         'buildtype=debugoptimized',
         'warning_level=1',
@@ -9,8 +9,7 @@ project('v4l-utils', 'c', 'cpp',
     ],
     license : 'LGPL 2.1+')
 
-# meson >= 0.56 can use instead meson.project_source_root()
-source_root = meson.current_source_dir()
+source_root = meson.project_source_root()
 
 cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
@@ -23,6 +22,7 @@ sys_root = meson.get_external_property('sys_root', '/')
 fs = import('fs')
 i18n = import('i18n')
 pkg = import('pkgconfig')
+qt6 = import('qt6')
 qt5 = import('qt5')
 
 as_version = meson.project_version()
@@ -35,15 +35,18 @@ conf = configuration_data()
 conf.set_quoted('PACKAGE', meson.project_name())
 conf.set_quoted('PACKAGE_VERSION', as_version)
 conf.set_quoted('V4L_UTILS_VERSION', as_version)
+conf.set('MAN_PACKAGE_VERSION', as_version)
 conf.set('MAJOR', as_major_version)
 conf.set('MINOR', as_minor_version)
 conf.set('PATCH', as_patch_version)
 
 common_arguments = [
     '-Wpointer-arith',
+    '-Wno-psabi',
     '-D_GNU_SOURCE',
     '-DPROMOTED_MODE_T=int',
     '-DENABLE_NLS',
+    '-DGETSUBOPT_IGNORE_COMMA_IN_BRACKET',
     '-include', meson.current_build_dir() / 'config.h',
 ]
 
@@ -51,8 +54,12 @@ v4l2_wrapper_args = [
     # As the library needs to provide both 32-bit and 64-bit versions
     # of file operations, disable transparent large file support (fixes
     # 'Error: symbol `open64/mmap64' is already defined' compile failure
-    # otherwise)
+    # otherwise).
+    #
+    # Also disable _TIME_BITS=64 since this is allowed only with
+    # _FILE_OFFSET_BITS=64, which is now 32.
     '-U_FILE_OFFSET_BITS',
+    '-U_TIME_BITS',
     '-D_FILE_OFFSET_BITS=32',
     '-D_LARGEFILE64_SOURCE',
 ]
@@ -65,6 +72,12 @@ if host_machine.system() == 'linux'
     v4l2_utils_incdir_arr += 'include'
 elif host_machine.system() == 'freebsd'
     v4l2_utils_incdir_arr += 'contrib/freebsd/include'
+endif
+
+# These platforms default to __[us]64 as long. Add this define to get long long
+# as is done elsewhere.
+if host_machine.cpu_family() in ['alpha', 'mips64', 'ppc64']
+  add_project_arguments('-D__SANE_USERSPACE_TYPES__', language: ['c', 'cpp'])
 endif
 
 v4l2_utils_incdir = include_directories(v4l2_utils_incdir_arr)
@@ -89,11 +102,27 @@ dep_libdl = cc.find_library('dl')
 dep_libelf = cc.find_library('elf', required : get_option('bpf'))
 dep_libm = cc.find_library('m')
 dep_librt = cc.find_library('rt')
-dep_qt5 = dependency('qt5', modules: ['Core', 'Gui', 'Widgets'],
-                     required : get_option('qvidcap').enabled() or get_option('qv4l2').enabled())
-
-dep_qt5_opengl = dependency('qt5', modules: ['OpenGL'],
-                     required : get_option('qvidcap').enabled())
+dep_qt6 = dependency('qt6', modules: ['Core', 'Gui', 'Widgets', 'Core5Compat'], required: false)
+if dep_qt6.found()
+  dep_qt_opengl = dependency('qt6', modules: ['OpenGL', 'OpenGLWidgets'],
+                             required : get_option('qvidcap').enabled())
+  dep_qt = dep_qt6
+  dep_qt_version = 'Qt6'
+  dep_qt_options = ['cpp_std=gnu++17']
+  dep_qt_args = ['-std=gnu++17']
+else
+  dep_qt = dependency('qt5', modules: ['Core', 'Gui', 'Widgets'],
+                      required : get_option('qvidcap').enabled() or get_option('qv4l2').enabled())
+  if dep_qt.found()
+    dep_qt_version = 'Qt5'
+  else
+    dep_qt_version = ''
+  endif
+  dep_qt_opengl = dependency('qt5', modules: ['OpenGL'],
+                             required : get_option('qvidcap').enabled())
+  dep_qt_options = []
+  dep_qt_args = []
+endif
 
 dep_libbpf = dependency('libbpf', required : get_option('bpf'), version : '>=0.7')
 
@@ -178,20 +207,30 @@ size_t iconv (iconv_t cd, char * *inbuf, size_t *inbytesleft, char * *outbuf, si
     endif
 endif
 
+dep_intl = dependency('intl')
+
 have_gconv = cc.has_header('gconv.h', required : get_option('gconv'))
 
 # Detect system gconv directory
 gconvsysdir = get_option('gconvsysdir')
 
 # Generic check: works with most distributions
-gconv_dirs_generic = [
-    'lib64',
-    'usr/lib64',
-    'lib',
-    'usr/lib',
-    'usr/local/lib64',
-    'usr/local/lib',
-]
+if cc.sizeof('long') == 8
+    gconv_dirs_generic = [
+        'lib64',
+        'usr/lib64',
+        'lib',
+        'usr/lib',
+        'usr/local/lib64',
+        'usr/local/lib',
+    ]
+else
+    gconv_dirs_generic = [
+        'lib',
+        'usr/lib',
+        'usr/local/lib',
+    ]
+endif
 
 if gconvsysdir == ''
     foreach dir : gconv_dirs_generic
@@ -255,9 +294,9 @@ if dep_jpeg.found()
     dep_jpeg_priv_libs = '-ljpeg'
 endif
 
+dep_systemd = dependency('systemd', required : false)
 systemd_systemdir = get_option('systemdsystemunitdir')
 if systemd_systemdir == ''
-    dep_systemd = dependency('systemd', required : false)
     if dep_systemd.found()
         systemd_systemdir = dep_systemd.get_variable(pkgconfig : 'systemdsystemunitdir')
     endif
@@ -289,23 +328,35 @@ if udevdir == ''
     udevdir = '/lib/udev'
 endif
 
-qt5_opengl_test = '''
+docdir = get_option('docdir')
+if docdir == ''
+    docdir = get_option('datadir') / 'doc' / '@0@'.format(meson.project_name())
+endif
+
+qt_opengl_test = '''
 #define GL_GLEXT_PROTOTYPES
 #define QT_NO_OPENGL_ES_2
 
+#include <QtCore>
+#if QT_VERSION < 0x060000
 #include <QGLWidget>
 #include <QGLShader>
 #include <QGLShaderProgram>
 #include <QGLFunctions>
+#else
+#include <QOpenGLWidget>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
+#endif
 
 #ifndef GL_UNSIGNED_INT_8_8_8_8
 #error Missing OpenGL Extensions
 #endif
 '''
-have_qt5_opengl = cpp.compiles(qt5_opengl_test,
-                               dependencies : [dep_gl, dep_qt5, dep_qt5_opengl],
-                               args : '-fPIC')
-if have_qt5_opengl
+have_qt_opengl = cpp.compiles(qt_opengl_test,
+                               dependencies : [dep_gl, dep_qt, dep_qt_opengl],
+                               args : ['-fPIC'] + dep_qt_args)
+if have_qt_opengl
     conf.set('HAVE_QTGL', 1)
 endif
 
@@ -358,6 +409,8 @@ subdir('lib')
 if get_option('v4l-utils')
     subdir('utils')
     subdir('contrib')
+else
+    ir_bpf_enabled = false
 endif
 
 subdir('doc')
@@ -379,9 +432,9 @@ summary({
             'GL' : dep_gl.found(),
             'GLU' : dep_glu.found(),
             'JSON-C' : dep_jsonc.found(),
-            'Qt5' : [
-                dep_qt5.found(),
-                have_qt5_opengl ? 'with QtGL' : 'without QtGL',
+            'Qt5/Qt6' : [
+                dep_qt.found(),
+                dep_qt_version + (have_qt_opengl ? ' with QtGL' : ' without QtGL'),
             ],
             'SDL' : dep_sdl.found(),
             'X11' : dep_x11.found(),
@@ -412,10 +465,12 @@ summary({
                 get_option('v4l2-compliance-libv4l') ? 'with libv4l' : 'without libv4l',
             ],
             'v4l2-compliance-32' : is_variable('v4l2_compliance_32'),
+            'v4l2-compliance-32-time64' : is_variable('v4l2_compliance_32_time64'),
             'v4l2-ctl' : [
                 is_variable('v4l2_ctl'),
                 get_option('v4l2-ctl-libv4l') ? 'with libv4l' : 'without libv4l',
             ],
             'v4l2-ctl-32' : is_variable('v4l2_ctl_32'),
+            'v4l2-ctl-32-time64' : is_variable('v4l2_ctl_32_time64'),
             'v4l2-tracer' : is_variable('v4l2_tracer'),
         }, bool_yn : true, section : 'Applications')

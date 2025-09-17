@@ -34,7 +34,7 @@ contrib/freebsd/include/linux/videodev2.h:
 #
 
 debian/:
-  copyright: 2008-2023, Gregor Jasny <gjasny@googlemail.com>
+  copyright: 2008-2025, Gregor Jasny <gjasny@googlemail.com>
   license: GPL-2+
 
 #
@@ -93,3 +93,9 @@ utils/qv4l2/vbi-tab.cpp:
   license: GPL-2
 utils/qv4l2/vbi-tab.h:
   license: GPL-2
+
+utils/edid-decode/:
+  license: Expat
+
+utils/edid-decode/data/:
+  override-copyright: no-info-found

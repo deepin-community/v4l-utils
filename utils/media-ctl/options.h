@@ -22,6 +22,8 @@
 #ifndef __OPTIONS_H
 #define __OPTIONS_H
 
+#include <linux/v4l2-subdev.h>
+
 struct media_options
 {
 	const char *devname;
@@ -37,6 +39,7 @@ struct media_options
 	const char *get_dv_pad;
 	const char *dv_pad;
 	const char *routes;
+	enum v4l2_subdev_format_whence which;
 };
 
 extern struct media_options media_opts;

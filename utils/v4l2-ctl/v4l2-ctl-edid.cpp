@@ -88,7 +88,8 @@ static __u8 toggle_hdmi_vsdb_cnc_flags;
 #define HDMI_VSDB_LATENCY	(1 << 7)
 
 static __u8 toggle_hf_vsdb_flags;
-#define HF_VSDB_SCSD_PRESENT	(1 << 7)
+#define HF_VSDB_SCDC_PRESENT	(1 << 7)
+#define HF_VSDB_CABLE_STATUS	(1 << 5)
 
 static int mod_s_pt = -1;
 static int mod_s_it = -1;
@@ -130,6 +131,8 @@ void edid_usage()
 	       "                     hdmi-4k-300mhz: CTA-861 with HDMI support up to 4kp30\n"
 	       "                     hdmi-4k-600mhz: CTA-861 with HDMI support up to 4kp60\n"
 	       "                     hdmi-4k-600mhz-with-displayid: Block Map Extension Block, CTA-861 with\n"
+	       "                         HDMI support up to 4kp60, DisplayID Extension Block\n"
+	       "                     hdmi-4k-600mhz-with-displayid-eeodb: CTA-861 with EEODB and\n"
 	       "                         HDMI support up to 4kp60, DisplayID Extension Block\n"
 	       "                     displayport: DisplayID supporting a DisplayPort interface (1920x1200)\n"
 	       "                     displayport-with-cta861: DisplayID supporting a DisplayPort interface,\n"
@@ -186,6 +189,7 @@ void edid_usage()
 	       "\n"
 	       "                     HDMI Forum Vendor-Specific Data Block modifiers:\n"
 	       "                     scdc: toggle the SCDC Present bit.\n"
+	       "                     cable-status: toggle the Cable Status bit.\n"
 	       "\n"
 	       "                     CTA-861 Video Capability Descriptor modifiers:\n"
 	       "                     qy: toggle the QY YCC Quantization Range bit.\n"
@@ -227,8 +231,8 @@ void edid_usage()
 	       "                     carray: c-program struct\n"
 	       "                     If <file> is '-' or not the 'file' argument is not supplied, then the data\n"
 	       "                     is written to stdout.\n"
-	       "  --fix-edid-checksums\n"
-	       "                     If specified then any checksum errors will be fixed silently.\n"
+	       "  --keep-edid-checksums\n"
+	       "                     If specified then any checksum errors will be kept.\n"
 	       );
 }
 
@@ -321,22 +325,6 @@ static void fix_edid(struct v4l2_edid *e)
 	}
 }
 
-static bool verify_edid(struct v4l2_edid *e)
-{
-	bool valid = true;
-
-	for (unsigned b = 0; b < e->blocks; b++) {
-		const unsigned char *buf = e->edid + 128 * b;
-
-		if (!crc_ok(buf)) {
-			fprintf(stderr, "Block %u has a checksum error (should be 0x%02x)\n",
-					b, crc_calc(buf));
-			valid = false;
-		}
-	}
-	return valid;
-}
-
 static void hexdumpedid(FILE *f, struct v4l2_edid *e)
 {
 	for (unsigned b = 0; b < e->blocks; b++) {
@@ -352,8 +340,8 @@ static void hexdumpedid(FILE *f, struct v4l2_edid *e)
 			fprintf(f, "\n");
 		}
 		if (!crc_ok(buf))
-			fprintf(f, "Block %u has a checksum error (should be 0x%02x)\n",
-					b, crc_calc(buf));
+			fprintf(stderr, "Block %u has a checksum error (should be 0x%02x)\n",
+				b, crc_calc(buf));
 	}
 }
 
@@ -366,7 +354,7 @@ static void rawdumpedid(FILE *f, struct v4l2_edid *e)
 			fprintf(f, "%c", buf[i]);
 		if (!crc_ok(buf))
 			fprintf(stderr, "Block %u has a checksum error (should be %02x)\n",
-					b, crc_calc(buf));
+				b, crc_calc(buf));
 	}
 }
 
@@ -386,8 +374,8 @@ static void carraydumpedid(FILE *f, struct v4l2_edid *e)
 			fprintf(f, "\n");
 		}
 		if (!crc_ok(buf))
-			fprintf(f, "\t/* Block %u has a checksum error (should be 0x%02x) */\n",
-					b, crc_calc(buf));
+			fprintf(stderr, "Block %u has a checksum error (should be 0x%02x)\n",
+				b, crc_calc(buf));
 	}
 	fprintf(f, "};\n");
 }
@@ -673,7 +661,8 @@ static void print_edid_mods(const struct v4l2_edid *e)
 		if (v)
 			printf("  Max TMDS Character Rate: %u MHz\n", v * 5);
 		v = e->edid[loc + 1];
-		printf("  SCDC Present:            %s\n", (v & HF_VSDB_SCSD_PRESENT) ? "yes" : "no");
+		printf("  SCDC Present:            %s\n", (v & HF_VSDB_SCDC_PRESENT) ? "yes" : "no");
+		printf("  Cable Status:            %s\n", (v & HF_VSDB_CABLE_STATUS) ? "yes" : "no");
 	}
 	loc = get_edid_vid_cap_location(e->edid, e->blocks * 128);
 	if (loc >= 0) {
@@ -1002,6 +991,59 @@ static uint8_t hdmi_edid_4k_600_with_displayid[512] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd4, 0x90,
 };
 
+static uint8_t hdmi_edid_4k_600_with_displayid_eeodb[384] = {
+	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
+	0x31, 0xd8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00,
+	0x22, 0x1a, 0x01, 0x03, 0x80, 0x60, 0x36, 0x78,
+	0x0f, 0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26,
+	0x0f, 0x50, 0x54, 0x2f, 0xcf, 0x00, 0x31, 0x59,
+	0x45, 0x59, 0x81, 0x80, 0x81, 0x40, 0x90, 0x40,
+	0x95, 0x00, 0xa9, 0x40, 0xb3, 0x00, 0x08, 0xe8,
+	0x00, 0x30, 0xf2, 0x70, 0x5a, 0x80, 0xb0, 0x58,
+	0x8a, 0x00, 0xc0, 0x1c, 0x32, 0x00, 0x00, 0x1e,
+	0x00, 0x00, 0x00, 0xfd, 0x00, 0x18, 0x55, 0x18,
+	0x87, 0x3c, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x68,
+	0x64, 0x6d, 0x69, 0x20, 0x34, 0x2d, 0x62, 0x6c,
+	0x6f, 0x63, 0x6b, 0x73, 0x00, 0x00, 0x00, 0x10,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xe6,
+
+	0x02, 0x03, 0x42, 0xf1, 0xe2, 0x78, 0x02, 0x51,
+	0x61, 0x60, 0x5f, 0x5e, 0x5d, 0x10, 0x1f, 0x04,
+	0x13, 0x22, 0x21, 0x20, 0x05, 0x14, 0x02, 0x11,
+	0x01, 0x23, 0x09, 0x07, 0x07, 0x83, 0x01, 0x00,
+	0x00, 0x6d, 0x03, 0x0c, 0x00, 0x10, 0x00, 0x00,
+	0x3c, 0x21, 0x00, 0x60, 0x01, 0x02, 0x03, 0x67,
+	0xd8, 0x5d, 0xc4, 0x01, 0x78, 0x00, 0x00, 0xe2,
+	0x00, 0xca, 0xe3, 0x05, 0x00, 0x00, 0xe3, 0x06,
+	0x01, 0x00, 0x4d, 0xd0, 0x00, 0xa0, 0xf0, 0x70,
+	0x3e, 0x80, 0x30, 0x20, 0x35, 0x00, 0xc0, 0x1c,
+	0x32, 0x00, 0x00, 0x1e, 0x1a, 0x36, 0x80, 0xa0,
+	0x70, 0x38, 0x1f, 0x40, 0x30, 0x20, 0x35, 0x00,
+	0xc0, 0x1c, 0x32, 0x00, 0x00, 0x1a, 0x1a, 0x1d,
+	0x00, 0x80, 0x51, 0xd0, 0x1c, 0x20, 0x40, 0x80,
+	0x35, 0x00, 0xc0, 0x1c, 0x32, 0x00, 0x00, 0x1c,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x23,
+
+	0x70, 0x12, 0x79, 0x03, 0x00, 0x00, 0x00, 0x1c,
+	0x4c, 0x4e, 0x58, 0x34, 0x12, 0x56, 0x34, 0x12,
+	0x00, 0x22, 0x10, 0x10, 0x48, 0x44, 0x4d, 0x49,
+	0x20, 0x2b, 0x20, 0x44, 0x69, 0x73, 0x70, 0x6c,
+	0x61, 0x79, 0x49, 0x44, 0x01, 0x00, 0x0c, 0x80,
+	0x25, 0x18, 0x15, 0x00, 0x0f, 0x70, 0x08, 0x80,
+	0x78, 0x4e, 0x77, 0x0f, 0x00, 0x0a, 0x71, 0x20,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x03, 0x01, 0x14, 0x07, 0xe8, 0x00, 0x84, 0xff,
+	0x0e, 0x2f, 0x02, 0xaf, 0x80, 0x57, 0x00, 0x6f,
+	0x08, 0x59, 0x00, 0x07, 0x80, 0x09, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd4, 0x90,
+};
+
 static uint8_t displayport_edid[256] = {
 	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
 	0x31, 0xd8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00,
@@ -1164,6 +1206,7 @@ void edid_cmd(int ch, char *optarg)
 				"btfc",
 				"btfl-btbr",
 				"tpls-tprs",
+				"cable-status",
 				nullptr
 			};
 
@@ -1198,6 +1241,9 @@ void edid_cmd(int ch, char *optarg)
 				} else if (!strcmp(value, "hdmi-4k-600mhz-with-displayid")) {
 					sedid.edid = hdmi_edid_4k_600_with_displayid;
 					sedid.blocks = sizeof(hdmi_edid_4k_600_with_displayid) / 128;
+				} else if (!strcmp(value, "hdmi-4k-600mhz-with-displayid-eeodb")) {
+					sedid.edid = hdmi_edid_4k_600_with_displayid_eeodb;
+					sedid.blocks = sizeof(hdmi_edid_4k_600_with_displayid_eeodb) / 128;
 				} else if (!strcmp(value, "hdmi-4k-600mhz")) {
 					sedid.edid = hdmi_edid_4k_600;
 					sedid.blocks = sizeof(hdmi_edid_4k_600) / 128;
@@ -1219,6 +1265,7 @@ void edid_cmd(int ch, char *optarg)
 					printf("hdmi-4k-300mhz: CTA-861 with HDMI support up to 4kp30\n");
 					printf("hdmi-4k-600mhz: CTA-861 with HDMI support up to 4kp60\n");
 					printf("hdmi-4k-600mhz-with-displayid: Block Map Extension Block, CTA-861 with\n");
+					printf("hdmi-4k-600mhz-with-displayid-eeodb: CTA-861 with EEODB and\n");
 					printf("\tHDMI support up to 4kp60, DisplayID Extension Block\n");
 					printf("displayport: DisplayID supporting a DisplayPort interface (1920x1200)\n");
 					printf("displayport-with-cta861: DisplayID supporting a DisplayPort interface,\n");
@@ -1273,7 +1320,7 @@ void edid_cmd(int ch, char *optarg)
 			case 14: toggle_hdmi_vsdb_cnc_flags |= HDMI_VSDB_PHOTO; break;
 			case 15: toggle_hdmi_vsdb_cnc_flags |= HDMI_VSDB_CINEMA; break;
 			case 16: toggle_hdmi_vsdb_cnc_flags |= HDMI_VSDB_GAME; break;
-			case 17: toggle_hf_vsdb_flags |= HF_VSDB_SCSD_PRESENT; break;
+			case 17: toggle_hf_vsdb_flags |= HF_VSDB_SCDC_PRESENT; break;
 			case 18: toggle_cta861_hdr_flags |= CTA861_HDR_UNDERSCAN; break;
 			case 19: toggle_cta861_hdr_flags |= CTA861_HDR_AUDIO; break;
 			case 20: toggle_cta861_hdr_flags |= CTA861_HDR_YCBCR444; break;
@@ -1313,6 +1360,7 @@ void edid_cmd(int ch, char *optarg)
 			case 54: toggle_speaker3_flags |= SPEAKER3_BTFC; break;
 			case 55: toggle_speaker3_flags |= SPEAKER3_BTFL_BTFR; break;
 			case 56: toggle_speaker3_flags |= SPEAKER3_TPLS_TPRS; break;
+			case 57: toggle_hf_vsdb_flags |= HF_VSDB_CABLE_STATUS; break;
 			case 0:
 				 if (ch == OptSetEdid) {
 					 sedid.pad = strtoul(value, nullptr, 0);
@@ -1411,7 +1459,6 @@ void edid_set(cv4l_fd &_fd)
 
 	if (options[OptSetEdid] || options[OptShowEdid]) {
 		FILE *fin = nullptr;
-		bool must_fix_edid = options[OptFixEdidChecksums];
 
 		if (file_in) {
 			if (!strcmp(file_in, "-"))
@@ -1438,7 +1485,6 @@ void edid_set(cv4l_fd &_fd)
 				sedid.edid[loc] ^= toggle_cta861_hdr_flags;
 				if (phys_addr >= 0)
 					set_edid_phys_addr(sedid.edid, sedid.blocks * 128, phys_addr);
-				must_fix_edid = true;
 			}
 		}
 		if (toggle_speaker1_flags || toggle_speaker2_flags || toggle_speaker3_flags) {
@@ -1447,7 +1493,6 @@ void edid_set(cv4l_fd &_fd)
 				sedid.edid[loc] ^= toggle_speaker1_flags;
 				sedid.edid[loc + 1] ^= toggle_speaker2_flags;
 				sedid.edid[loc + 2] ^= toggle_speaker3_flags;
-				must_fix_edid = true;
 			}
 		}
 		if (toggle_hdmi_vsdb_dc_flags || toggle_hdmi_vsdb_cnc_flags) {
@@ -1456,22 +1501,16 @@ void edid_set(cv4l_fd &_fd)
 			if (loc >= 0) {
 				__u8 len = sedid.edid[loc] & 0x1f;
 
-				if (len >= 6) {
+				if (len >= 6)
 					sedid.edid[loc + 6] ^= toggle_hdmi_vsdb_dc_flags;
-					must_fix_edid = true;
-				}
-				if (len >= 8) {
+				if (len >= 8)
 					sedid.edid[loc + 8] ^= toggle_hdmi_vsdb_cnc_flags;
-					must_fix_edid = true;
-				}
 			}
 		}
 		if (toggle_hf_vsdb_flags) {
 			loc = get_edid_hf_vsdb_location(sedid.edid, sedid.blocks * 128);
-			if (loc >= 0) {
+			if (loc >= 0)
 				sedid.edid[loc + 1] ^= toggle_hf_vsdb_flags;
-				must_fix_edid = true;
-			}
 		}
 		if (toggle_vid_cap_flags || mod_s_pt >= 0 ||
 		    mod_s_ce >= 0 || mod_s_it >= 0) {
@@ -1490,7 +1529,6 @@ void edid_set(cv4l_fd &_fd)
 					sedid.edid[loc] &= 0xcf;
 					sedid.edid[loc] |= mod_s_pt << 4;
 				}
-				must_fix_edid = true;
 			}
 		}
 		if (toggle_colorimetry_flags1 || toggle_colorimetry_flags2) {
@@ -1498,17 +1536,14 @@ void edid_set(cv4l_fd &_fd)
 			if (loc >= 0) {
 				sedid.edid[loc] ^= toggle_colorimetry_flags1;
 				sedid.edid[loc + 1] ^= toggle_colorimetry_flags2;
-				must_fix_edid = true;
 			}
 		}
 		if (toggle_hdr_md_flags) {
 			loc = get_edid_hdr_md_location(sedid.edid, sedid.blocks * 128);
-			if (loc >= 0) {
+			if (loc >= 0)
 				sedid.edid[loc] ^= toggle_hdr_md_flags;
-				must_fix_edid = true;
-			}
 		}
-		if (must_fix_edid)
+		if (!options[OptKeepEdidChecksums])
 			fix_edid(&sedid);
 		if (verbose && options[OptSetEdid])
 			print_edid_mods(&sedid);
@@ -1525,10 +1560,8 @@ void edid_set(cv4l_fd &_fd)
 					printf("\n");
 				}
 			}
-		} else if (verify_edid(&sedid)) {
-			doioctl(fd, VIDIOC_S_EDID, &sedid);
 		} else {
-			fprintf(stderr, "EDID not set due to checksum errors\n");
+			doioctl(fd, VIDIOC_S_EDID, &sedid);
 		}
 		if (fin) {
 			if (sedid.edid) {
@@ -1560,11 +1593,8 @@ void edid_get(cv4l_fd &_fd)
 			}
 		}
 		gedid.edid = static_cast<unsigned char *>(malloc(gedid.blocks * 128));
-		if (doioctl(fd, VIDIOC_G_EDID, &gedid) == 0) {
-			if (options[OptFixEdidChecksums])
-				fix_edid(&gedid);
+		if (doioctl(fd, VIDIOC_G_EDID, &gedid) == 0)
 			printedid(fout, &gedid, gformat);
-		}
 		if (file_out && fout != stdout)
 			fclose(fout);
 		free(gedid.edid);

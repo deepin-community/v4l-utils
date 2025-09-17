@@ -16,9 +16,12 @@ pid_t tracee_pid = 0;
 void v4l2_tracer_sig_handler(int signum)
 {
 	line_info("\n\tReceived signum: %d", signum);
-	kill(tracee_pid, signum);
-	/* Wait for tracee to handle the signal first before v4l2-tracer exits. */
-	wait(nullptr);
+
+	/* If there is a tracee, wait for it to handle the signal first before exiting. */
+	if (tracee_pid) {
+		kill(tracee_pid, signum);
+		wait(nullptr);
+	}
 }
 
 enum Options {
@@ -293,25 +296,27 @@ int tracer(int argc, char *argv[], bool retrace)
 	fclose(trace_file);
 
 	/*
-	 * Preload the libv4l2tracer library. The libv4l2tracer is looked up next to
-	 * the executable first in order to support uninstalled build.
+	 * Preload the libv4l2tracer library. The tracer is looked up using following order:
+	 * 1. Check if LD_PRELOAD is already set, in which case just honor it
+	 * 2. Check V4L2_TRACER_PATH env is set (meson devenv / uninstalled)
+	 * 3. Check in the prefix/libdir path for an installed tracer.
 	 */
 	std::string libv4l2tracer_path;
-	std::string program = argv[0];
-	std::size_t idx = program.rfind("/");
-	struct stat sb;
-
-	if (idx == std::string::npos)
-		idx = 0;
+	if (getenv("LD_PRELOAD"))
+		libv4l2tracer_path = std::string(getenv("LD_PRELOAD"));
+	else if (getenv("V4L2_TRACER"))
+		libv4l2tracer_path = std::string(getenv("V4L2_TRACER"));
 	else
-		idx++;
-
-	/* look for libv4l2tracer next to the executable */
-	libv4l2tracer_path = program.replace(program.begin() + idx, program.end(), "libv4l2tracer.so");
-
-	/* otherwise, use the installation path */
-	if (stat(libv4l2tracer_path.c_str(), &sb) == -1)
 		libv4l2tracer_path = std::string(LIBTRACER_PATH) + "/libv4l2tracer.so";
+
+	struct stat sb;
+	if (stat(libv4l2tracer_path.c_str(), &sb) == -1) {
+		if (stat(libv4l2tracer_path.c_str(), &sb) == -1) {
+			fprintf(stderr, "Exiting: can't find libv4l2tracer library in %s\n", libv4l2tracer_path.c_str());
+			fprintf(stderr, "If you are using a different location, try setting the env 'V4L2_TRACER'\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	if (is_verbose())
 		fprintf(stderr, "Loading libv4l2tracer: %s\n", libv4l2tracer_path.c_str());
@@ -355,6 +360,7 @@ int tracer(int argc, char *argv[], bool retrace)
 	fprintf(stderr, "%s", trace_filename.c_str());
 	fprintf(stderr, "\n");
 
+	unsetenv("LD_PRELOAD");
 	return exec_result;
 }
 

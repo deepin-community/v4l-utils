@@ -38,6 +38,8 @@
 	case V4L2_PIX_FMT_RGBX1010102: return "32-bit RGBX 10-10-10-2";
 	case V4L2_PIX_FMT_RGBA1010102: return "32-bit RGBA 10-10-10-2";
 	case V4L2_PIX_FMT_ARGB2101010: return "32-bit ARGB 2-10-10-10";
+	case V4L2_PIX_FMT_BGR48: return "48-bit BGR 16-16-16";
+	case V4L2_PIX_FMT_RGB48: return "48-bit RGB 16-16-16";
 	case V4L2_PIX_FMT_BGR48_12: return "12-bit Depth BGR";
 	case V4L2_PIX_FMT_ABGR64_12: return "12-bit Depth BGRA";
 	case V4L2_PIX_FMT_GREY: return "8-bit Greyscale";
@@ -52,8 +54,11 @@
 	case V4L2_PIX_FMT_Y10BPACK: return "10-bit Greyscale (Packed)";
 	case V4L2_PIX_FMT_Y10P: return "10-bit Greyscale (MIPI Packed)";
 	case V4L2_PIX_FMT_IPU3_Y10: return "10-bit greyscale (IPU3 Packed)";
+	case V4L2_PIX_FMT_Y12P: return "12-bit Greyscale (MIPI Packed)";
+	case V4L2_PIX_FMT_Y14P: return "14-bit Greyscale (MIPI Packed)";
 	case V4L2_PIX_FMT_Y8I: return "Interleaved 8-bit Greyscale";
 	case V4L2_PIX_FMT_Y12I: return "Interleaved 12-bit Greyscale";
+	case V4L2_PIX_FMT_Y16I: return "Interleaved 16-bit Greyscale";
 	case V4L2_PIX_FMT_Z16: return "16-bit Depth";
 	case V4L2_PIX_FMT_INZI: return "Planar 10:16 Greyscale Depth";
 	case V4L2_PIX_FMT_CNF4: return "4-bit Depth Confidence (Packed)";
@@ -185,6 +190,7 @@
 	case V4L2_META_FMT_VIVID: return "Vivid Metadata";
 	case V4L2_META_FMT_RK_ISP1_PARAMS: return "Rockchip ISP1 3A Parameters";
 	case V4L2_META_FMT_RK_ISP1_STAT_3A: return "Rockchip ISP1 3A Statistics";
+	case V4L2_META_FMT_RK_ISP1_EXT_PARAMS: return "Rockchip ISP1 Ext 3A Params";
 	case V4L2_PIX_FMT_NV12_8L128: return "NV12 (8x128 Linear)";
 	case V4L2_PIX_FMT_NV12M_8L128: return "NV12M (8x128 Linear)";
 	case V4L2_PIX_FMT_NV12_10BE_8L128: return "10-bit NV12 (8x128 Linear, BE)";
@@ -192,6 +198,9 @@
 	case V4L2_PIX_FMT_Y210: return "10-bit YUYV Packed";
 	case V4L2_PIX_FMT_Y212: return "12-bit YUYV Packed";
 	case V4L2_PIX_FMT_Y216: return "16-bit YUYV Packed";
+	case V4L2_META_FMT_RPI_BE_CFG: return "RPi PiSP BE Config format";
+	case V4L2_META_FMT_RPI_FE_CFG: return "RPi PiSP FE Config format";
+	case V4L2_META_FMT_RPI_FE_STATS: return "RPi PiSP FE Statistics format";
 	case V4L2_PIX_FMT_MJPEG: return "Motion-JPEG";
 	case V4L2_PIX_FMT_JPEG: return "JFIF JPEG";
 	case V4L2_PIX_FMT_DV: return "1394";
@@ -245,3 +254,13 @@
 	case V4L2_PIX_FMT_MT2110T: return "Mediatek 10bit Tile Mode";
 	case V4L2_PIX_FMT_MT2110R: return "Mediatek 10bit Raster Mode";
 	case V4L2_PIX_FMT_HEXTILE: return "Hextile Compressed Format";
+	case V4L2_PIX_FMT_PISP_COMP1_RGGB: return "PiSP 8b RGRG/GBGB mode1 compr";
+	case V4L2_PIX_FMT_PISP_COMP1_GRBG: return "PiSP 8b GRGR/BGBG mode1 compr";
+	case V4L2_PIX_FMT_PISP_COMP1_GBRG: return "PiSP 8b GBGB/RGRG mode1 compr";
+	case V4L2_PIX_FMT_PISP_COMP1_BGGR: return "PiSP 8b BGBG/GRGR mode1 compr";
+	case V4L2_PIX_FMT_PISP_COMP1_MONO: return "PiSP 8b monochrome mode1 compr";
+	case V4L2_PIX_FMT_PISP_COMP2_RGGB: return "PiSP 8b RGRG/GBGB mode2 compr";
+	case V4L2_PIX_FMT_PISP_COMP2_GRBG: return "PiSP 8b GRGR/BGBG mode2 compr";
+	case V4L2_PIX_FMT_PISP_COMP2_GBRG: return "PiSP 8b GBGB/RGRG mode2 compr";
+	case V4L2_PIX_FMT_PISP_COMP2_BGGR: return "PiSP 8b BGBG/GRGR mode2 compr";
+	case V4L2_PIX_FMT_PISP_COMP2_MONO: return "PiSP 8b monochrome mode2 compr";

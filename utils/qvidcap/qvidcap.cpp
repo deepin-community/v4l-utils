@@ -36,7 +36,7 @@ static void usage()
 	       "  -c, --count=<cnt>        stop after <cnt> captured frames\n"
 	       "  -b, --buffers=<bufs>     request <bufs> buffers (default 4) when streaming\n"
 	       "                           from a video device\n"
-	       "  -s, --single-step[=<frm>] starting with frame <frm> (default 1), pause after\n"
+	       "  -s, --single-step[=<frm>] starting with frame <frm> (default 0), pause after\n"
 	       "                           displaying each frame until Space is pressed.\n"
 	       "  -C, --colorspace=<c>     override colorspace\n"
 	       "                           <c> can be one of the following colorspaces:\n"
@@ -75,12 +75,15 @@ static void usage()
 	       "  -A, --padding=<bytes>    set additional horizontal padding (after width)\n"
 	       "  --fps=<fps>              set frames-per-second (default is 30)\n"
 	       "\n"
-	       "  The following option is only valid when reading from a file:\n"
+	       "  The following options are only valid when reading from a file:\n"
 	       "\n"
 	       "  -F, --field=<f>          override field setting\n"
 	       "                           <f> can be one of the following field layouts:\n"
 	       "                               any, none, top, bottom, interlaced, seq_tb, seq_bt,\n"
 	       "                               alternate, interlaced_tb, interlaced_bt\n"
+	       "  --no-loop                stop at the end of the file, don't loop back to the beginning\n"
+	       "  --from-frame=<frame>     start playing back the file at the given frame number (starts at 0)\n"
+	       "\n"
 	       "  The following options are specific to the test pattern generator:\n"
 	       "\n"
 	       "  --list-patterns          list available patterns for use with --pattern\n"
@@ -434,16 +437,19 @@ int main(int argc, char **argv)
 	cv4l_fd fd;
 	enum AppMode mode = AppModeV4L2;
 	int sock_fd = -1;
+	cv4l_queue q;
 	cv4l_fmt fmt;
 	v4l2_fract pixelaspect = { 1, 1 };
 	unsigned cnt = 0;
 	unsigned v4l2_bufs = 4;
 	bool single_step = false;
-	unsigned single_step_start = 1;
+	unsigned single_step_start = 0;
 	int port = 0;
 	bool info_option = false;
 	bool report_timings = false;
 	bool verbose = false;
+	bool no_loop = false;
+	unsigned from_frame = 0;
 	__u32 overridePixelFormat = 0;
 	__u32 overrideWidth = 0;
 	__u32 overrideHeight = 0;
@@ -647,6 +653,11 @@ int main(int argc, char **argv)
 			force_opengl = true;
 		} else if (isOption(args[i], "--verbose", "-v")) {
 			verbose = true;
+		} else if (isOption(args[i], "--no-loop")) {
+			no_loop = true;
+		} else if (isOptArg(args[i], "--from-frame")) {
+			if (!processOption(args, i, from_frame))
+				return 0;
 		} else if (isOption(args[i], "--raw", "-R")) {
 			fd.s_direct(true);
 		} else if (isOptArg(args[i], "--count", "-c")) {
@@ -657,7 +668,7 @@ int main(int argc, char **argv)
 				return 0;
 		} else if (isOption(args[i], "--single-step", "-s")) {
 			single_step = true;
-			single_step_start = 1;
+			single_step_start = 0;
 		} else if (isOptArg(args[i], "--single-step", "-s")) {
 			if (!processOption(args, i, single_step_start))
 				return 0;
@@ -743,10 +754,10 @@ int main(int argc, char **argv)
 	QSurfaceFormat::setDefaultFormat(format);
 	CaptureWin win(sa);
 	win.setVerbose(verbose);
+	win.setNoLoop(no_loop);
+	win.setFromFrame(from_frame);
 	if (mode == AppModeFile) {
 		win.setModeFile(filename);
-		if (single_step_start)
-			single_step_start--;
 	} else if (mode == AppModeV4L2) {
 		win.setModeV4L2(&fd);
 	} else if (mode == AppModeTPG) {
@@ -807,7 +818,7 @@ int main(int argc, char **argv)
 	if (mode == AppModeSocket)
 		win.setModeSocket(sock_fd, port);
 	else if (mode == AppModeV4L2) {
-		cv4l_queue q(fd.g_type(), V4L2_MEMORY_MMAP);
+		q.init(fd.g_type(), V4L2_MEMORY_MMAP);
 		q.reqbufs(&fd, v4l2_bufs);
 		q.obtain_bufs(&fd);
 		q.queue_all(&fd);
