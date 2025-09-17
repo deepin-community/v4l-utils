@@ -1,0 +1,20 @@
+From: Tianyu Chen <sweetyfish@deepin.org>
+Date: Wed, 17 Sep 2025 16:13:02 +0800
+Subject: memset v4l2_buffer to zero
+
+---
+ lib/libv4l2/libv4l2.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/libv4l2/libv4l2.c b/lib/libv4l2/libv4l2.c
+index 1607ec3..4f58b4b 100644
+--- a/lib/libv4l2/libv4l2.c
++++ b/lib/libv4l2/libv4l2.c
+@@ -1586,6 +1586,7 @@ ssize_t v4l2_read(int fd, void *dest, size_t n)
+ 	} else {
+ 		struct v4l2_buffer buf;
+ 
++		memset(&buf, 0, sizeof(buf));
+ 		buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 		buf.memory = V4L2_MEMORY_MMAP;
+ 		result = v4l2_dequeue_and_convert(index, &buf, dest, n);
