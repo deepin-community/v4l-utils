@@ -1,4 +1,4 @@
-libdvbv5.so.0 libdvbv5-0t64 #MINVER#
+libdvbv5.so.0 libdvbv5-0 #MINVER#
 * Build-Depends-Package: libdvbv5-dev
  __dvb_fe_close@Base 1.12.1
  __dvb_fe_get_parms@Base 1.12.1

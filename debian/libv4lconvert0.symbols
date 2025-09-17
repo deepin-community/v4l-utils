@@ -1,4 +1,4 @@
-libv4lconvert.so.0 libv4lconvert0t64 #MINVER#
+libv4lconvert.so.0 libv4lconvert0 #MINVER#
 * Build-Depends-Package: libv4l-dev
  v4lconvert_convert@Base 0.5.0
  v4lconvert_create@Base 0.5.0
