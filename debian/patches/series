@@ -1,1 +1,2 @@
 dont-gererate-treeview.diff
+0002-memset-v4l2_buffer-to-zero.patch

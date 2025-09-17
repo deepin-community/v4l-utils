@@ -1,8 +1,9 @@
 v4l-utils (1.30.1-1deepin1) UNRELEASED; urgency=medium
 
   * Revert 64-bit time_t transition changes.
+  * memset v4l2_buffer to zero
 
- -- Tianyu Chen <sweetyfish@deepin.org>  Wed, 17 Sep 2025 13:56:06 +0800
+ -- Tianyu Chen <sweetyfish@deepin.org>  Wed, 17 Sep 2025 16:13:52 +0800
 
 v4l-utils (1.30.1-1) unstable; urgency=medium
 
