@@ -2,7 +2,7 @@ Source: v4l-utils
 Section: video
 Priority: optional
 Maintainer: Gregor Jasny <gjasny@googlemail.com>
-Build-Depends: dpkg-dev (>= 1.22.5), debhelper-compat (= 13),
+Build-Depends: debhelper-compat (= 13),
                clang:native [amd64 arm64 armel armhf i386 mips mips64el mipsel ppc64el s390x powerpc powerpcspe riscv64 ppc64 sparc64],
                doxygen,
                gettext,
@@ -25,13 +25,10 @@ Vcs-Browser: https://salsa.debian.org/debian/libv4l
 Vcs-Git: https://salsa.debian.org/debian/libv4l.git
 Homepage: https://linuxtv.org/wiki/index.php/V4l-utils
 
-Package: libv4l-0t64
-Provides: ${t64:Provides}
-Replaces: libv4l-0
-Breaks: libv4l-0 (<< ${source:Version})
+Package: libv4l-0
 Section: libs
 Architecture: linux-any kfreebsd-any
-Depends: libv4lconvert0t64 (= ${binary:Version}),
+Depends: libv4lconvert0 (= ${binary:Version}),
          ${shlibs:Depends},
          ${misc:Depends}
 Pre-Depends: ${misc:Pre-Depends}
@@ -52,10 +49,7 @@ Description: Collection of video4linux support libraries
  .
  This package contains the shared libraries.
 
-Package: libv4lconvert0t64
-Provides: ${t64:Provides}
-Replaces: libv4lconvert0
-Breaks: libv4lconvert0 (<< ${source:Version})
+Package: libv4lconvert0
 Section: libs
 Architecture: linux-any kfreebsd-any
 Depends: ${shlibs:Depends},
@@ -68,10 +62,7 @@ Description: Video4linux frame format conversion library
  .
  This package contains the shared library.
 
-Package: libv4l2rds0t64
-Provides: ${t64:Provides}
-Replaces: libv4l2rds0
-Breaks: libv4l2rds0 (<< ${source:Version})
+Package: libv4l2rds0
 Section: libs
 Architecture: linux-any kfreebsd-any
 Depends: ${shlibs:Depends},
@@ -88,9 +79,9 @@ Description: Video4Linux Radio Data System (RDS) decoding library
 Package: libv4l-dev
 Section: libdevel
 Architecture: linux-any kfreebsd-any
-Depends: libv4l-0t64 (= ${binary:Version}),
-         libv4lconvert0t64 (= ${binary:Version}),
-         libv4l2rds0t64 (= ${binary:Version}),
+Depends: libv4l-0 (= ${binary:Version}),
+         libv4lconvert0 (= ${binary:Version}),
+         libv4l2rds0 (= ${binary:Version}),
          libjpeg-dev,
          ${shlibs:Depends},
          ${misc:Depends}
@@ -118,8 +109,8 @@ Description: Collection of video4linux support libraries (development files)
 Package: v4l-utils
 Section: utils
 Architecture: linux-any
-Depends: libv4l-0t64 (= ${binary:Version}),
-         libv4l2rds0t64 (= ${binary:Version}),
+Depends: libv4l-0 (= ${binary:Version}),
+         libv4l2rds0 (= ${binary:Version}),
          ${shlibs:Depends},
          ${misc:Depends}
 Replaces: ivtv-utils (<< 1.4.1-2), media-ctl
@@ -134,10 +125,7 @@ Description: Collection of command line video4linux utilities
   v4l2-dbg: tool to directly get and set registers of v4l2 devices
   v4l2-sysfs-path: sysfs helper tool
 
-Package: libdvbv5-0t64
-Provides: ${t64:Provides}
-Replaces: libdvbv5-0
-Breaks: libdvbv5-0 (<< ${source:Version})
+Package: libdvbv5-0
 Section: libs
 Architecture: linux-any
 Depends: ${shlibs:Depends},
@@ -153,7 +141,7 @@ Description: Libraries to control, scan and zap on Digital TV channels
 Package: libdvbv5-dev
 Section: libdevel
 Architecture: linux-any
-Depends: libdvbv5-0t64 (= ${binary:Version}),
+Depends: libdvbv5-0 (= ${binary:Version}),
          libudev-dev,
          ${shlibs:Depends},
          ${misc:Depends}
@@ -180,7 +168,7 @@ Description: Doxygen generated documentation for libdvbv5
 Package: dvb-tools
 Section: utils
 Architecture: linux-any
-Depends: libdvbv5-0t64 (= ${binary:Version}),
+Depends: libdvbv5-0 (= ${binary:Version}),
          ${shlibs:Depends},
          ${misc:Depends}
 Description: Collection of command line DVB utilities
@@ -205,7 +193,7 @@ Description: Collection of command line DVB utilities
 Package: qv4l2
 Section: utils
 Architecture: linux-any
-Depends: libv4l-0t64 (= ${binary:Version}),
+Depends: libv4l-0 (= ${binary:Version}),
          ${shlibs:Depends},
          ${misc:Depends}
 Description: Test bench application for video4linux devices
@@ -215,7 +203,7 @@ Description: Test bench application for video4linux devices
 Package: qvidcap
 Section: utils
 Architecture: linux-any
-Depends: libv4l-0t64 (= ${binary:Version}),
+Depends: libv4l-0 (= ${binary:Version}),
          ${shlibs:Depends},
          ${misc:Depends}
 Description: Capture test utility for video4linux devices
