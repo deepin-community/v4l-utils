@@ -270,7 +270,8 @@ void CaptureWinGLEngine::setLinearFilter(bool enable)
 
 void CaptureWinGLEngine::clearShader()
 {
-	glDeleteTextures(m_screenTextureCount, m_screenTexture);
+	if (m_screenTextureCount)
+		glDeleteTextures(m_screenTextureCount, m_screenTexture);
 	if (m_shaderProgram.isLinked()) {
 		m_shaderProgram.release();
 		m_shaderProgram.removeAllShaders();
@@ -300,7 +301,11 @@ void CaptureWinGLEngine::initializeGL()
 	// for us.
 	GLint res = 0;
 	glGetIntegerv(GL_FRAMEBUFFER_SRGB_CAPABLE_EXT, &res);
-	m_haveFramebufferSRGB = res;
+	// With Qt6 enabling sRGB results in dark colors for some reason.
+	// It is fine with Qt5.
+	// Since qvidcap also ignores this (i.e. it never enables sRGB)
+	// I decided to do the same for qv4l2, so just set this to false.
+	m_haveFramebufferSRGB = false;
 	if (m_haveFramebufferSRGB)
 		glEnable(GL_FRAMEBUFFER_SRGB);
 	m_hasGLRed = glGetString(GL_VERSION)[0] >= '3';
@@ -617,6 +622,7 @@ void CaptureWinGLEngine::paintGL()
 
 	if (m_formatChange)
 		changeShader();
+	m_shaderProgram.bind();
 
 	if (m_frameData == NULL) {
 		paintFrame();

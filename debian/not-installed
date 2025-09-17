@@ -8,3 +8,5 @@ usr/lib/*/libv4lconvert.la
 usr/lib/*/v4l1compat.so
 usr/lib/*/v4l2convert.so
 usr/lib/*/libv4l/plugins/libv4l-mplane.la
+usr/bin/edid-decode
+usr/share/man/man1/edid-decode.1

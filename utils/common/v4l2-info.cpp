@@ -91,6 +91,8 @@ static std::string cap2s(unsigned cap)
 		s += "\t\tI/O MC\n";
 	if (cap & V4L2_CAP_READWRITE)
 		s += "\t\tRead/Write\n";
+	if (cap & V4L2_CAP_EDID)
+		s += "\t\tEDID Only\n";
 	if (cap & V4L2_CAP_STREAMING)
 		s += "\t\tStreaming\n";
 	if (cap & V4L2_CAP_EXT_PIX_FORMAT)
@@ -128,7 +130,8 @@ void v4l2_info_capability(const v4l2_capability &vcap)
 	}
 }
 
-void v4l2_info_subdev_capability(const v4l2_subdev_capability &subdevcap)
+void v4l2_info_subdev_capability(const v4l2_subdev_capability &subdevcap,
+				 const v4l2_subdev_client_capability &subdevclientcap)
 {
 	printf("\tDriver version   : %d.%d.%d\n",
 	       subdevcap.version >> 16,
@@ -136,6 +139,8 @@ void v4l2_info_subdev_capability(const v4l2_subdev_capability &subdevcap)
 	       subdevcap.version & 0xff);
 	printf("\tCapabilities     : 0x%08x\n", subdevcap.capabilities);
 	printf("%s", subdevcap2s(subdevcap.capabilities).c_str());
+	printf("\tClient Capabilities: 0x%016llx\n", subdevclientcap.capabilities);
+	printf("%s", subdevclientcap2s(subdevclientcap.capabilities).c_str());
 }
 
 std::string fcc2s(__u32 val)
@@ -207,6 +212,7 @@ static constexpr flag_def bufcap_def[] = {
 	{ V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF, "m2m-hold-capture-buf" },
 	{ V4L2_BUF_CAP_SUPPORTS_MMAP_CACHE_HINTS, "mmap-cache-hints" },
 	{ V4L2_BUF_CAP_SUPPORTS_MAX_NUM_BUFFERS, "max-num-buffers" },
+	{ V4L2_BUF_CAP_SUPPORTS_REMOVE_BUFS, "remove-bufs" },
 	{ 0, nullptr }
 };
 
@@ -378,6 +384,7 @@ static constexpr flag_def fmtdesc_ ## enc_type ## _def[] = { 			\
 	{ V4L2_FMT_FLAG_CSC_YCBCR_ENC, "csc-"#enc_type }, 			\
 	{ V4L2_FMT_FLAG_CSC_QUANTIZATION, "csc-quantization" }, 		\
 	{ V4L2_FMT_FLAG_CSC_XFER_FUNC, "csc-xfer-func" }, 			\
+	{ V4L2_FMT_FLAG_META_LINE_BASED, "meta-line-based" },			\
 	{ 0, NULL } 								\
 };
 
@@ -531,6 +538,7 @@ std::string ctrlflags2s(__u32 flags)
 		{ V4L2_CTRL_FLAG_EXECUTE_ON_WRITE, "execute-on-write" },
 		{ V4L2_CTRL_FLAG_MODIFY_LAYOUT, "modify-layout" },
 		{ V4L2_CTRL_FLAG_DYNAMIC_ARRAY, "dynamic-array" },
+		{ V4L2_CTRL_FLAG_HAS_WHICH_MIN_MAX, "has-min-max" },
 		{ 0, nullptr }
 	};
 	return flags2s(flags, def);
@@ -872,4 +880,15 @@ std::string modulation2s(unsigned modulation)
 		return "AM";
 	}
 	return "Unknown";
+}
+
+std::string subdevclientcap2s(__u64 cap)
+{
+	std::string s;
+
+	if (cap & V4L2_SUBDEV_CLIENT_CAP_STREAMS)
+		s += "streams ";
+	if (cap & V4L2_SUBDEV_CLIENT_CAP_INTERVAL_USES_WHICH)
+		s += "interval-uses-which ";
+	return s;
 }

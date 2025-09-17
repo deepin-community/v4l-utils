@@ -174,13 +174,13 @@ static void prt_buf_info(char *name,struct v4l2_buffer *p)
 {
 	struct v4l2_timecode *tc=&p->timecode;
 
-	printf ("%s: %02ld:%02d:%02d.%08ld index=%d, type=%s, "
+	printf ("%s: %02llu:%02d:%02d.%08llu index=%d, type=%s, "
 		"bytesused=%d, flags=0x%08x, "
 		"field=%s, sequence=%d, memory=%s, offset=0x%08x, length=%d\n",
-		name, (p->timestamp.tv_sec/3600),
+		name, (__u64)(p->timestamp.tv_sec/3600),
 		(int)(p->timestamp.tv_sec/60)%60,
 		(int)(p->timestamp.tv_sec%60),
-		p->timestamp.tv_usec,
+		(__u64)p->timestamp.tv_usec,
 		p->index,
 		prt_names(p->type,v4l2_type_names),
 		p->bytesused,p->flags,
@@ -509,9 +509,9 @@ int v4l2_gettryset_fmt_cap (struct v4l2_driver *drv, enum v4l2_direction dir,
 	}
 
 	if (drv->debug)
-		printf( "FMT SET: %dx%d, fourcc=%c%c%c%c, %d bytes/line,"
-			" %d bytes/frame, colorspace=0x%08x\n",
-			pix->width,pix->height,
+		printf( "FMT SET: %ux%u, fourcc=%c%c%c%c, %u bytes/line,"
+			" %u bytes/frame, colorspace=0x%08x\n",
+			pix->width, pix->height,
 			pix->pixelformat & 0xff,
 			(pix->pixelformat >>  8) & 0xff,
 			(pix->pixelformat >> 16) & 0xff,

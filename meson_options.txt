@@ -22,16 +22,22 @@ option('v4l-wrappers', type : 'boolean',
        description : 'V4L wrappers support')
 option('v4l2-compliance-32', type : 'boolean', value : false,
        description : 'Enable v4l2-compliance-32 compilation (for debugging purposes only)')
+option('v4l2-compliance-32-time64', type : 'boolean', value : false,
+       description : 'Enable v4l2-compliance-32-time64 compilation (for debugging purposes only)')
 option('v4l2-compliance-libv4l', type : 'boolean',
        description : 'Enable use of libv4l in v4l2-compliance')
 option('v4l2-ctl-32', type : 'boolean', value : false,
        description : 'Enable v4l2-ctl-32 compilation (for debugging purposes only)')
+option('v4l2-ctl-32-time64', type : 'boolean', value : false,
+       description : 'Enable v4l2-ctl-32-time64 compilation (for debugging purposes only)')
 option('v4l2-ctl-libv4l', type : 'boolean',
        description : 'Enable use of libv4l in v4l2-ctl')
 option('v4l2-ctl-stream-to', type : 'boolean',
        description : 'Enable use of --stream-to in v4l2-ctl')
 
 # Directories
+option('docdir', type : 'string',
+       description : 'Set documentation directory')
 option('gconvsysdir', type : 'string',
        description : 'Set system gconv directory (default is to autodetect)')
 option('libv4l1subdir', type : 'string', value : 'libv4l',

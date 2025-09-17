@@ -121,7 +121,7 @@ static int testSubDevEnumFrameInterval(struct node *node, unsigned which,
 }
 
 static int testSubDevEnumFrameSize(struct node *node, unsigned which,
-				   unsigned pad, unsigned code)
+				   unsigned pad, unsigned stream, unsigned code)
 {
 	struct v4l2_subdev_frame_size_enum fse;
 	unsigned num_sizes;
@@ -130,7 +130,7 @@ static int testSubDevEnumFrameSize(struct node *node, unsigned which,
 	memset(&fse, 0, sizeof(fse));
 	fse.which = which;
 	fse.pad = pad;
-	fse.stream = 0;
+	fse.stream = stream;
 	fse.code = code;
 	ret = doioctl(node, VIDIOC_SUBDEV_ENUM_FRAME_SIZE, &fse);
 	node->has_subdev_enum_fsize |= (ret != ENOTTY) << which;
@@ -140,7 +140,7 @@ static int testSubDevEnumFrameSize(struct node *node, unsigned which,
 		memset(&fie, 0, sizeof(fie));
 		fie.which = which;
 		fie.pad = pad;
-		fie.stream = 0;
+		fie.stream = stream;
 		fie.code = code;
 		fail_on_test(doioctl(node, VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL, &fie) != ENOTTY);
 		return ret;
@@ -156,7 +156,7 @@ static int testSubDevEnumFrameSize(struct node *node, unsigned which,
 	memset(&fse, 0xff, sizeof(fse));
 	fse.which = which;
 	fse.pad = pad;
-	fse.stream = 0;
+	fse.stream = stream;
 	fse.code = code;
 	fse.index = 0;
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_ENUM_FRAME_SIZE, &fse));
@@ -266,31 +266,44 @@ int testSubDevEnum(struct node *node, unsigned which, unsigned pad, unsigned str
 		fail_on_test(mbus_core_enum.stream != stream);
 		fail_on_test(mbus_core_enum.index != i);
 
-		ret = testSubDevEnumFrameSize(node, which, pad, mbus_core_enum.code);
+		ret = testSubDevEnumFrameSize(node, which, pad, stream, mbus_core_enum.code);
 		fail_on_test(ret && ret != ENOTTY);
 	}
 	return 0;
 }
 
-int testSubDevFrameInterval(struct node *node, unsigned pad, unsigned stream)
+int testSubDevFrameInterval(struct node *node, unsigned which, unsigned pad, unsigned stream)
 {
 	struct v4l2_subdev_frame_interval fival;
 	struct v4l2_fract ival;
+	bool has_which = node->has_ival_uses_which();
 	int ret;
 
+	if (!has_which)
+		which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	memset(&fival, 0xff, sizeof(fival));
 	fival.pad = pad;
 	fival.stream = stream;
+	if (has_which)
+		fival.which = which;
 	ret = doioctl(node, VIDIOC_SUBDEV_G_FRAME_INTERVAL, &fival);
+	if (has_which)
+		node->has_subdev_frame_interval |= (ret != ENOTTY) << which;
 	if (ret == ENOTTY) {
 		fail_on_test(node->enum_frame_interval_pad >= 0);
 		fail_on_test(doioctl(node, VIDIOC_SUBDEV_S_FRAME_INTERVAL, &fival) != ENOTTY);
 		return ret;
 	}
+
+	if (!has_which)
+		warn_once("V4L2_SUBDEV_CLIENT_CAP_INTERVAL_USES_WHICH is not supported\n");
+
 	fail_on_test(node->frame_interval_pad >= 0);
 	fail_on_test(node->enum_frame_interval_pad != (int)pad);
 	node->frame_interval_pad = pad;
 	fail_on_test(check_0(fival.reserved, sizeof(fival.reserved)));
+	if (has_which)
+		fail_on_test(fival.which != which);
 	fail_on_test(fival.pad != pad);
 	fail_on_test(fival.stream != stream);
 	fail_on_test(!fival.interval.numerator);
@@ -303,6 +316,8 @@ int testSubDevFrameInterval(struct node *node, unsigned pad, unsigned stream)
 		return 0;
 	}
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_S_FRAME_INTERVAL, &fival));
+	if (has_which)
+		fail_on_test(fival.which != which);
 	fail_on_test(fival.pad != pad);
 	fail_on_test(fival.stream != stream);
 	fail_on_test(ival.numerator != fival.interval.numerator);
@@ -311,12 +326,22 @@ int testSubDevFrameInterval(struct node *node, unsigned pad, unsigned stream)
 	memset(&fival, 0, sizeof(fival));
 	fival.pad = pad;
 	fival.stream = stream;
+	if (has_which)
+		fival.which = which;
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_G_FRAME_INTERVAL, &fival));
+	if (has_which)
+		fail_on_test(fival.which != which);
 	fail_on_test(fival.pad != pad);
 	fail_on_test(fival.stream != stream);
 	fail_on_test(ival.numerator != fival.interval.numerator);
 	fail_on_test(ival.denominator != fival.interval.denominator);
 
+	if (has_which) {
+		fival.which = ~0;
+		fail_on_test(doioctl(node, VIDIOC_SUBDEV_G_FRAME_INTERVAL, &fival) != EINVAL);
+		fail_on_test(doioctl(node, VIDIOC_SUBDEV_S_FRAME_INTERVAL, &fival) != EINVAL);
+		fival.which = which;
+	}
 	fival.pad = node->entity.pads;
 	fival.stream = stream;
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_G_FRAME_INTERVAL, &fival) != EINVAL);
@@ -561,18 +586,16 @@ int testSubDevRouting(struct node *node, unsigned which)
 	int ret;
 
 	routing.which = which;
-	routing.routes = (__u64)&routes;
+	routing.routes = (uintptr_t)&routes;
+	routing.len_routes = 0;
 	routing.num_routes = 0;
 	memset(routing.reserved, 0xff, sizeof(routing.reserved));
 
-	/*
-	 * First test that G_ROUTING either returns success, or ENOSPC and
-	 * updates num_routes.
-	 */
+	/* First test that G_ROUTING returns success even when len_routes is 0. */
 
 	ret = doioctl(node, VIDIOC_SUBDEV_G_ROUTING, &routing);
-	fail_on_test(ret && ret != ENOSPC);
-	fail_on_test(ret == ENOSPC && routing.num_routes == 0);
+	fail_on_test(ret);
+	fail_on_test(routing.num_routes > NUM_ROUTES_MAX);
 	fail_on_test(check_0(routing.reserved, sizeof(routing.reserved)));
 
 	if (!routing.num_routes)
@@ -584,7 +607,8 @@ int testSubDevRouting(struct node *node, unsigned which)
 	 */
 
 	uint32_t num_routes = routing.num_routes;
-	routing.num_routes = num_routes + 1;
+	routing.len_routes = NUM_ROUTES_MAX;
+	routing.num_routes = 0;
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_G_ROUTING, &routing));
 	fail_on_test(routing.num_routes != num_routes);
 
@@ -608,10 +632,14 @@ int testSubDevRouting(struct node *node, unsigned which)
 		}
 	}
 
-	/* Set the same routes back, which should always succeed. */
+	/*
+	 * Set the same routes back, which should always succeed and report the
+	 * same number of routes.
+	 */
 
 	memset(routing.reserved, 0xff, sizeof(routing.reserved));
 	fail_on_test(doioctl(node, VIDIOC_SUBDEV_S_ROUTING, &routing));
+	fail_on_test(routing.num_routes != num_routes);
 	fail_on_test(check_0(routing.reserved, sizeof(routing.reserved)));
 
 	/* Test setting invalid pads */

@@ -38,6 +38,7 @@ enum Option {
 	OptRemote = 'r',
 	OptReplyThreshold = 'R',
 	OptSkipInfo = 's',
+	OptShowTimestamp = 'S',
 	OptTimeout = 't',
 	OptTrace = 'T',
 	OptVerbose = 'v',
@@ -122,6 +123,7 @@ static struct option long_options[] = {
 	{"color", required_argument, nullptr, OptColor},
 	{"skip-info", no_argument, nullptr, OptSkipInfo},
 	{"wall-clock", no_argument, nullptr, OptWallClock},
+	{"show-timestamp", no_argument, nullptr, OptShowTimestamp},
 	{"interactive", no_argument, nullptr, OptInteractive},
 	{"reply-threshold", required_argument, nullptr, OptReplyThreshold},
 
@@ -229,7 +231,8 @@ static void usage()
 	       "  -T, --trace        Trace all called ioctls\n"
 	       "  -v, --verbose      Turn on verbose reporting\n"
 	       "  --version          Show version information\n"
-	       "  -w, --wall-clock   Show timestamps as wall-clock time (implies -v)\n"
+	       "  -w, --wall-clock   Show timestamps as wall-clock time\n"
+	       "  -S, --show-timestamp Show timestamp of the start of each test\n"
 	       "  -W, --exit-on-warn Exit on the first warning.\n"
 	       );
 }
@@ -276,8 +279,16 @@ static std::string ts2s(__u64 ts)
 	t = res.tv_sec;
 	s = ctime(&t);
 	s = s.substr(0, s.length() - 6);
-	sprintf(buf, "%03lu", res.tv_usec / 1000);
+	sprintf(buf, "%03llu", (__u64)res.tv_usec / 1000);
 	return s + "." + buf;
+}
+
+std::string current_ts()
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts2s(ts.tv_sec * 1000000000ULL + ts.tv_nsec);
 }
 
 const char *power_status2s(__u8 power_status)
@@ -881,7 +892,7 @@ int main(int argc, char **argv)
 	std::string device;
 	const char *driver = nullptr;
 	const char *adapter = nullptr;
-	char short_options[26 * 2 * 2 + 1];
+	char short_options[26 * 2 * 3 + 1];
 	int remote_la = -1;
 	bool test_remote = false;
 	unsigned test_tags = 0;
@@ -1004,6 +1015,7 @@ int main(int argc, char **argv)
 			test_remote = true;
 			break;
 		case OptWallClock:
+			break;
 		case OptVerbose:
 			show_info = true;
 			break;
@@ -1059,7 +1071,11 @@ int main(int argc, char **argv)
 	node.device = device.c_str();
 	doioctl(&node, CEC_ADAP_G_CAPS, &caps);
 	node.caps = caps.capabilities;
+	node.msg_fl_mask = CEC_MSG_FL_REPLY_TO_FOLLOWERS | CEC_MSG_FL_RAW;
+	if (node.caps & CEC_CAP_REPLY_VENDOR_ID)
+		node.msg_fl_mask |= CEC_MSG_FL_REPLY_VENDOR_ID;
 	node.available_log_addrs = caps.available_log_addrs;
+	node.is_vivid = !strcmp(caps.driver, "vivid");
 
 	if (options[OptTestAudioRateControl])
 		test_tags |= TAG_AUDIO_RATE_CONTROL;
@@ -1157,6 +1173,7 @@ int main(int argc, char **argv)
 
 	struct cec_log_addrs laddrs = { };
 	doioctl(&node, CEC_ADAP_G_LOG_ADDRS, &laddrs);
+	node.vendor_id = laddrs.vendor_id;
 
 	if (node.phys_addr == CEC_PHYS_ADDR_INVALID &&
 	    !(node.caps & (CEC_CAP_PHYS_ADDR | CEC_CAP_NEEDS_HPD)) &&
@@ -1274,7 +1291,8 @@ int main(int argc, char **argv)
 			for (unsigned to = 0; to <= 15; to++)
 				if (!(node.adap_la_mask & (1 << to)) &&
 				    (remote_la_mask & (1 << to)))
-					testRemote(&node, from, to, test_tags, options[OptInteractive]);
+					testRemote(&node, from, to, test_tags,
+						   options[OptInteractive], options[OptShowTimestamp]);
 		}
 	}
 

@@ -11,6 +11,7 @@ ir_keytable_sources = files(
 
 ir_keytable_deps = [
     dep_argp,
+    dep_intl,
 ]
 
 ir_keytable_system_dir = udevdir
@@ -69,6 +70,8 @@ ir_keytable_udev_rules = files(
 install_data(ir_keytable_udev_rules,
              install_dir : ir_keytable_system_dir / 'rules.d')
 
+if ir_bpf_enabled
+if dep_systemd.found()
 if have_udevdsyscallfilter
     ir_keytable_systemd_files = files(
         '50-rc_keymap.conf',
@@ -76,10 +79,7 @@ if have_udevdsyscallfilter
     install_data(ir_keytable_systemd_files,
                  install_dir : systemd_systemdir / 'systemd-udevd.service.d')
 endif
+endif
+endif
 
-# Install non-existing directory to create empty directory structure
-# See: https://github.com/mesonbuild/meson/issues/2904
-# This should be replaced with install_emptydir() when bumping the minimum meson
-# version to 0.60.0.
-install_subdir('protocols',
-               install_dir : ir_keytable_user_dir)
+install_emptydir(ir_keytable_user_dir / 'protocols')

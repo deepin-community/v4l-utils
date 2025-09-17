@@ -433,13 +433,12 @@ static int checkSimpleCtrl(const struct v4l2_control &ctrl, const struct test_qu
 
 int testSimpleControls(struct node *node)
 {
-	qctrl_map::iterator iter;
 	struct v4l2_control ctrl;
 	int ret;
 	int i;
 
-	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
-		test_query_ext_ctrl &qctrl = iter->second;
+	for (auto &control : node->controls) {
+		test_query_ext_ctrl &qctrl = control.second;
 
 		if (qctrl.type >= V4L2_CTRL_COMPOUND_TYPES || qctrl.nr_of_dims)
 			continue;
@@ -846,7 +845,6 @@ static int checkVividControls(struct node *node,
 
 int testExtendedControls(struct node *node)
 {
-	qctrl_map::iterator iter;
 	struct v4l2_ext_controls ctrls;
 	std::vector<struct v4l2_ext_control> total_vec;
 	std::vector<struct v4l2_ext_control> class_vec;
@@ -881,8 +879,8 @@ int testExtendedControls(struct node *node)
 	if (check_0(ctrls.reserved, sizeof(ctrls.reserved)))
 		return fail("reserved not zeroed\n");
 
-	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
-		test_query_ext_ctrl &qctrl = iter->second;
+	for (auto &control : node->controls) {
+		test_query_ext_ctrl &qctrl = control.second;
 
 		if (is_vivid && V4L2_CTRL_ID2WHICH(qctrl.id) == V4L2_CTRL_CLASS_VIVID)
 			continue;
@@ -973,6 +971,21 @@ int testExtendedControls(struct node *node)
 		if (is_vivid && ctrl.id == VIVID_CID_U32_DYN_ARRAY &&
 		    checkVividDynArray(node, ctrl, qctrl))
 			return fail("dynamic array tests failed\n");
+
+		ctrls.which = V4L2_CTRL_WHICH_MIN_VAL;
+		ret = doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls);
+		if (qctrl.flags & V4L2_CTRL_FLAG_HAS_WHICH_MIN_MAX)
+			fail_on_test_val(ret, ret);
+		else
+			fail_on_test_val(ret != EINVAL, ret);
+
+		ctrls.which = V4L2_CTRL_WHICH_MAX_VAL;
+		ret = doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls);
+		if (qctrl.flags & V4L2_CTRL_FLAG_HAS_WHICH_MIN_MAX)
+			fail_on_test_val(ret, ret);
+		else
+			fail_on_test_val(ret != EINVAL, ret);
+
 		if (qctrl.flags & V4L2_CTRL_FLAG_HAS_PAYLOAD)
 			delete [] ctrl.string;
 		ctrl.string = nullptr;
@@ -1003,8 +1016,8 @@ int testExtendedControls(struct node *node)
 	if (ctrls.error_idx != ctrls.count)
 		return fail("s_ext_ctrls(0) invalid error_idx %u\n", ctrls.error_idx);
 
-	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
-		test_query_ext_ctrl &qctrl = iter->second;
+	for (auto &control : node->controls) {
+		test_query_ext_ctrl &qctrl = control.second;
 		struct v4l2_ext_control ctrl;
 
 		if (qctrl.flags & (V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_WRITE_ONLY))
@@ -1084,15 +1097,22 @@ int testExtendedControls(struct node *node)
 	fail_on_test(!doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
 	fail_on_test(!doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls));
 	fail_on_test(doioctl(node, VIDIOC_G_EXT_CTRLS, &ctrls));
+
+	ctrls.which = V4L2_CTRL_WHICH_MIN_VAL;
+	fail_on_test(!doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+	fail_on_test(!doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls));
+
+	ctrls.which = V4L2_CTRL_WHICH_MAX_VAL;
+	fail_on_test(!doioctl(node, VIDIOC_S_EXT_CTRLS, &ctrls));
+	fail_on_test(!doioctl(node, VIDIOC_TRY_EXT_CTRLS, &ctrls));
+
 	return 0;
 }
 
 int testEvents(struct node *node)
 {
-	qctrl_map::iterator iter;
-
-	for (iter = node->controls.begin(); iter != node->controls.end(); ++iter) {
-		test_query_ext_ctrl &qctrl = iter->second;
+	for (auto &control : node->controls) {
+		test_query_ext_ctrl &qctrl = control.second;
 		struct v4l2_event_subscription sub = { 0 };
 		struct v4l2_event ev;
 		struct timeval timeout = { 0, 100 };
@@ -1154,8 +1174,14 @@ int testEvents(struct node *node)
 		}
 	}
 
+	if (node->codec_mask & STATEFUL_DECODER)
+		fail_on_test(node->controls.find(V4L2_CID_MIN_BUFFERS_FOR_CAPTURE) == node->controls.end());
+	else
+		fail_on_test(node->controls.find(V4L2_CID_MIN_BUFFERS_FOR_CAPTURE) != node->controls.end());
 	if (node->codec_mask & STATEFUL_ENCODER)
 		fail_on_test(node->controls.find(V4L2_CID_MIN_BUFFERS_FOR_OUTPUT) == node->controls.end());
+	else
+		fail_on_test(node->controls.find(V4L2_CID_MIN_BUFFERS_FOR_OUTPUT) != node->controls.end());
 
 	struct v4l2_event_subscription sub = { 0 };
 

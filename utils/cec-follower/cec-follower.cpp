@@ -354,7 +354,7 @@ void print_timers(struct node *node)
 			printf("source: %s, ", source.c_str());
 			if (t.recording_seq)
 				printf("rec-seq: 0x%x, ", t.recording_seq);
-			printf("needs: %ld %s\n", t.duration, "MB."); /* 1MB per second. */
+			printf("needs: %d %s\n", t.duration, "MB."); /* 1MB per second. */
 		}
 		printf("Total media space available for recording: ");
 		if (node->state.media_space_available >= 0)
@@ -400,7 +400,7 @@ int main(int argc, char **argv)
 	const char *driver = nullptr;
 	const char *adapter = nullptr;
 	unsigned toggle_power_status = 0;
-	char short_options[26 * 2 * 2 + 1];
+	char short_options[26 * 2 * 3 + 1];
 	int idx = 0;
 	int fd = -1;
 	int ch;

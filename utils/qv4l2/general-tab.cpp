@@ -68,6 +68,7 @@ GeneralTab::GeneralTab(const QString &device, cv4l_fd *fd, int n, QWidget *paren
 	m_hMargin(20),
 	m_isRadio(false),
 	m_isSDR(false),
+	m_isTouch(false),
 	m_isVbi(false),
 	m_isOutput(false),
 	m_isSDTV(false),
@@ -165,9 +166,11 @@ GeneralTab::GeneralTab(const QString &device, cv4l_fd *fd, int n, QWidget *paren
 		m_isVbi = g_caps() & (V4L2_CAP_VBI_CAPTURE | V4L2_CAP_SLICED_VBI_CAPTURE |
 				      V4L2_CAP_VBI_OUTPUT | V4L2_CAP_SLICED_VBI_OUTPUT);
 		m_isSDR = g_caps() & V4L2_CAP_SDR_CAPTURE;
+		m_isTouch = g_caps() & V4L2_CAP_TOUCH;
 		if (m_isSDR)
 			m_isRadio = true;
 		if (g_caps() & (V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_VIDEO_OUTPUT_MPLANE |
+				V4L2_CAP_META_OUTPUT |
 				V4L2_CAP_VBI_OUTPUT | V4L2_CAP_SLICED_VBI_OUTPUT))
 			m_isOutput = true;
 	}
@@ -195,7 +198,7 @@ GeneralTab::GeneralTab(const QString &device, cv4l_fd *fd, int n, QWidget *paren
 		m_audioOutDevice = new QComboBox(parent);
 	}
 
-	if (!isVbi() && (createAudioDeviceList() || (!isRadio() && !enum_audio(vaudio, true)) ||
+	if (!isVbi() && !isTouch() && (createAudioDeviceList() || (!isRadio() && !enum_audio(vaudio, true)) ||
 	    (!isSDR() && m_tuner.capability) || (!isRadio() && !enum_audout(vaudout, true)))) {
 		addTitle("Audio Settings");
 		audioSection(vaudio, vaudout); 
@@ -275,7 +278,7 @@ GeneralTab::GeneralTab(const QString &device, cv4l_fd *fd, int n, QWidget *paren
 	m_recordPrio = new QCheckBox(parentWidget());
 	addWidget(m_recordPrio);
 
-	if (!isRadio() && !isVbi() && (has_crop() || has_compose())) {
+	if (!isRadio() && !isVbi() && !isTouch() && (has_crop() || has_compose())) {
 		addTitle("Cropping & Compose Settings");
 		cropSection();
 	}
@@ -755,6 +758,8 @@ void GeneralTab::formatSection(v4l2_fmtdesc fmt)
 		m_colorspace->addItem("SMPTE 240M", QVariant(V4L2_COLORSPACE_SMPTE240M));
 		m_colorspace->addItem("470 System M", QVariant(V4L2_COLORSPACE_470_SYSTEM_M));
 		m_colorspace->addItem("470 System BG", QVariant(V4L2_COLORSPACE_470_SYSTEM_BG));
+		m_colorspace->addItem("JPEG", QVariant(V4L2_COLORSPACE_JPEG));
+		m_colorspace->addItem("Raw", QVariant(V4L2_COLORSPACE_RAW));
 
 		addLabel("Colorspace");
 		addWidget(m_colorspace);
@@ -800,7 +805,7 @@ void GeneralTab::formatSection(v4l2_fmtdesc fmt)
 		connect(m_quantRange, SIGNAL(activated(int)), SLOT(quantRangeChanged(int)));
 	}
 
-	if (m_isOutput)
+	if (m_isOutput || isTouch())
 		return;
 
 	m_cropping = new QComboBox(parentWidget());
@@ -912,40 +917,37 @@ void GeneralTab::fixWidth()
 	setColumnStretch(3, 1);
 
 	QList<QWidget *> list = parentWidget()->findChildren<QWidget *>();
-	QList<QWidget *>::iterator it;
-	for (it = list.begin(); it != list.end(); ++it)	{
-		if (!qobject_cast<QComboBox *>(*it) &&
-		    !qobject_cast<QSpinBox *>(*it) &&
-		    !qobject_cast<QSlider *>(*it))
+	for (const auto &child : list) {
+		if (!qobject_cast<QComboBox *>(child) && !qobject_cast<QSpinBox *>(child) &&
+		    !qobject_cast<QSlider *>(child))
 			continue;
 
-		if (((*it)->sizeHint().width()) > m_minWidth) {
-			m_increment = (int) ceil(((*it)->sizeHint().width() - m_minWidth) / m_pxw);
-			(*it)->setMinimumWidth(m_minWidth + m_increment * m_pxw); // for stepsize expansion of widgets
+		if ((child->sizeHint().width()) > m_minWidth) {
+			m_increment = (int)ceil((child->sizeHint().width() - m_minWidth) / m_pxw);
+			child->setMinimumWidth(m_minWidth + m_increment * m_pxw); // for stepsize expansion of widgets
 		}
 	}
 
 	// fix width of subgrids
-	QList<QGridLayout *>::iterator i;
-	for (i = m_grids.begin(); i != m_grids.end(); ++i) {
-		(*i)->setColumnStretch(3, 1);
-		(*i)->setContentsMargins(0, 0, 0, 0);
-		for (int n = 0; n < (*i)->count(); n++) {
-			if ((*i)->itemAt(n)->widget()->sizeHint().width() > m_maxw[n % 4]) {
-				m_maxw[n % 4] = (*i)->itemAt(n)->widget()->sizeHint().width();
+	for (const auto &grid : m_grids) {
+		grid->setColumnStretch(3, 1);
+		grid->setContentsMargins(0, 0, 0, 0);
+		for (int n = 0; n < grid->count(); n++) {
+			if (grid->itemAt(n)->widget()->sizeHint().width() > m_maxw[n % 4]) {
+				m_maxw[n % 4] = grid->itemAt(n)->widget()->sizeHint().width();
 			}
 			if (n % 2) {
-				if (!qobject_cast<QToolButton*>((*i)->itemAt(n)->widget()))
-					(*i)->itemAt(n)->widget()->setMinimumWidth(m_minWidth);
+				if (!qobject_cast<QToolButton *>(grid->itemAt(n)->widget()))
+					grid->itemAt(n)->widget()->setMinimumWidth(m_minWidth);
 			} else {
-				(*i)->itemAt(n)->widget()->setMinimumWidth(m_maxw[n % 4]);
+				grid->itemAt(n)->widget()->setMinimumWidth(m_maxw[n % 4]);
 			}
 		}
 		for (int j = 0; j < m_cols; j++) {
 			if (j % 2)
-				(*i)->setColumnMinimumWidth(j,m_maxw[j] + m_pxw);
+				grid->setColumnMinimumWidth(j, m_maxw[j] + m_pxw);
 			else
-				(*i)->setColumnMinimumWidth(j,m_maxw[j]);
+				grid->setColumnMinimumWidth(j, m_maxw[j]);
 		}
 	}
 
@@ -1202,7 +1204,7 @@ void GeneralTab::updateGUIInput(__u32 input)
 		m_stackedFrequency->hide();
 	}
 
-	if (isVbi()) {
+	if (isVbi() || isTouch()) {
 		m_stackedFrameSettings->hide();
 	}
 }
@@ -1823,7 +1825,7 @@ void GeneralTab::updateStandard()
 	m_tvStandard->setStatusTip(what);
 	m_tvStandard->setWhatsThis(what);
 	updateVidFormat();
-	if (!isVbi() && !m_isOutput)
+	if (!isVbi() && !isTouch() && !m_isOutput)
 		changePixelAspectRatio();
 }
 
@@ -1857,10 +1859,10 @@ void GeneralTab::refreshTimings()
 			char buf[100];
 
 			if (bt.interlaced)
-				sprintf(buf, "%dx%di%.2f", bt.width, bt.height,
+				sprintf(buf, "%ux%ui%.2f", bt.width, bt.height,
 					(double)bt.pixelclock / (tot_width * (tot_height / 2)));
 			else
-				sprintf(buf, "%dx%dp%.2f", bt.width, bt.height,
+				sprintf(buf, "%ux%up%.2f", bt.width, bt.height,
 					(double)bt.pixelclock / (tot_width * tot_height));
 			m_videoTimings->addItem(buf);
 		} while (!enum_dv_timings(timings));
@@ -2165,13 +2167,16 @@ void GeneralTab::updateFrameSize()
 
 	ok = !enum_framesizes(frmsize, m_pixelformat);
 	if (ok && frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
-		do {
-			m_frameSize->addItem(QString("%1x%2")
-				.arg(frmsize.discrete.width).arg(frmsize.discrete.height));
-			if (frmsize.discrete.width == m_width &&
-			    frmsize.discrete.height == m_height)
-				m_frameSize->setCurrentIndex(frmsize.index);
-		} while (!enum_framesizes(frmsize));
+		if (m_frameSize) {
+			do {
+				m_frameSize->addItem(QString("%1x%2")
+					.arg(frmsize.discrete.width)
+					.arg(frmsize.discrete.height));
+				if (frmsize.discrete.width == m_width &&
+				    frmsize.discrete.height == m_height)
+					m_frameSize->setCurrentIndex(frmsize.index);
+			} while (!enum_framesizes(frmsize));
+		}
 
 		m_discreteSizes = true;
 		m_frameWidth->setEnabled(false);
@@ -2187,7 +2192,8 @@ void GeneralTab::updateFrameSize()
 		m_frameHeight->setMaximum(m_height);
 		m_frameHeight->setValue(m_height);
 		m_frameHeight->blockSignals(false);
-		m_frameSize->setEnabled(!m_haveBuffers);
+		if (m_frameSize)
+			m_frameSize->setEnabled(!m_haveBuffers);
 		updateFrameInterval();
 		return;
 	}
@@ -2259,6 +2265,9 @@ double GeneralTab::getPixelAspectRatio()
 	unsigned w = 0, h = 0;
 
 	ratio = g_pixel_aspect(w, h);
+	if (!m_pixelAspectRatio)
+		return 1;
+
 	switch (m_pixelAspectRatio->currentIndex()) {
 	// override ratio if hardcoded, but keep w and h
 	case 1:
@@ -2424,7 +2433,7 @@ int GeneralTab::matchAudioDevice()
 bool GeneralTab::hasAlsaAudio()
 {
 #ifdef HAVE_ALSA
-	return !isVbi();
+	return !isVbi() && !isTouch();
 #else
 	return false;
 #endif

@@ -72,7 +72,7 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 	                           (long) buf_address_retrace_pointer);
 
 	if (is_verbose() || (errno != 0)) {
-		fprintf(stderr, "fd: %d, offset: %ld, ", fd_retrace, off);
+		fprintf(stderr, "fd: %d, offset: %lld, ", fd_retrace, (long long)off);
 		if (is_mmap64)
 			perror("mmap64");
 		else
@@ -876,6 +876,18 @@ struct v4l2_ext_control *retrace_v4l2_ext_control(json_object *parent_obj, int c
 	case V4L2_CID_STATELESS_MPEG2_QUANTISATION:
 		p->ptr = retrace_v4l2_ctrl_mpeg2_quantisation_gen(v4l2_ext_control_obj);
 		break;
+	case V4L2_CID_STATELESS_AV1_SEQUENCE:
+		p->ptr = retrace_v4l2_ctrl_av1_sequence_gen(v4l2_ext_control_obj);
+		break;
+	case V4L2_CID_STATELESS_AV1_TILE_GROUP_ENTRY:
+		p->ptr = retrace_v4l2_ctrl_av1_tile_group_entry_gen(v4l2_ext_control_obj);
+		break;
+	case V4L2_CID_STATELESS_AV1_FRAME:
+		p->ptr = retrace_v4l2_ctrl_av1_frame_gen(v4l2_ext_control_obj);
+		break;
+	case V4L2_CID_STATELESS_AV1_FILM_GRAIN:
+		p->ptr = retrace_v4l2_ctrl_av1_film_grain_gen(v4l2_ext_control_obj);
+		break;
 	default:
 		line_info("\n\tWarning: cannot retrace control: %s",
 		          val2s(p->id, control_val_def).c_str());
@@ -1525,12 +1537,11 @@ void retrace_array(json_object *root_array_obj)
 
 int retrace(std::string trace_filename)
 {
-	FILE *trace_file = fopen(trace_filename.c_str(), "r");
-	if (trace_file == nullptr) {
+	struct stat sb;
+	if (stat(trace_filename.c_str(), &sb) == -1) {
 		line_info("\n\tTrace file error: \'%s\'", trace_filename.c_str());
-		return 1;
+		return -EINVAL;
 	}
-	fclose(trace_file);
 
 	fprintf(stderr, "Retracing: %s\n", trace_filename.c_str());
 

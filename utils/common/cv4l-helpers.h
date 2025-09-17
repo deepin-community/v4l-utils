@@ -78,11 +78,15 @@ public:
 	bool has_rds_out() const { return v4l_has_rds_out(this); }
 	bool has_sdr_cap() const { return v4l_has_sdr_cap(this); }
 	bool has_sdr_out() const { return v4l_has_sdr_out(this); }
+	bool has_touch() const { return v4l_has_touch(this); }
+	bool has_meta_cap() const { return v4l_has_meta_cap(this); }
+	bool has_meta_out() const { return v4l_has_meta_out(this); }
 	bool has_hwseek() const { return v4l_has_hwseek(this); }
 	bool has_rw() const { return v4l_has_rw(this); }
 	bool has_streaming() const { return v4l_has_streaming(this); }
 	bool has_ext_pix_format() const { return v4l_has_ext_pix_format(this); }
 	bool has_streams() const { return have_streams; }
+	bool has_ival_uses_which() const { return ival_uses_which; }
 
 	int querycap(v4l2_capability &cap, bool force = false)
 	{
@@ -484,7 +488,7 @@ public:
 		return cv4l_ioctl(VIDIOC_ENUM_DV_TIMINGS, &timings);
 	}
 
-	int enum_fmt(v4l2_fmtdesc &fmt, bool init = false, int index = 0, unsigned type = 0, __u32 mbus_code = 0)
+	int enum_fmt(v4l2_fmtdesc &fmt, bool init = false, int index = 0, unsigned type = 0, __u32 mbus_code = 0, bool enum_all = false)
 	{
 		if (init) {
 			memset(&fmt, 0, sizeof(fmt));
@@ -494,6 +498,9 @@ public:
 		} else {
 			fmt.index++;
 		}
+		if (enum_all)
+			fmt.index |= V4L2_FMTDESC_FLAG_ENUM_ALL;
+
 		return cv4l_ioctl(VIDIOC_ENUM_FMT, &fmt);
 	}
 
@@ -736,6 +743,7 @@ public:
 	{
 		v4l_queue_init(this, type, memory);
 	}
+	~cv4l_queue() { v4l_queue_free_bufs_info(this); }
 	void init(unsigned type, unsigned memory)
 	{
 		v4l_queue_init(this, type, memory);
@@ -759,6 +767,10 @@ public:
 	int reqbufs(cv4l_fd *fd, unsigned count = 0, unsigned int flags = 0)
 	{
 		return v4l_queue_reqbufs(fd->g_v4l_fd(), this, count, flags);
+	}
+	int remove_bufs(cv4l_fd *fd, unsigned index = 0, unsigned count = 0)
+	{
+		return v4l_queue_remove_bufs(fd->g_v4l_fd(), this, index, count);
 	}
 	bool has_create_bufs(cv4l_fd *fd) const
 	{

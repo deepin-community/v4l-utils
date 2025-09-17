@@ -72,7 +72,7 @@ static std::string ts2s(__u64 ts, bool wallclock)
 	t = res.tv_sec;
 	s = ctime(&t);
 	s = s.substr(0, s.length() - 6);
-	sprintf(buf, "%03lu", res.tv_usec / 1000);
+	sprintf(buf, "%03llu", (__u64)res.tv_usec / 1000);
 	return s + "." + buf;
 }
 
@@ -98,13 +98,16 @@ static void log_event(struct cec_event &ev, bool wallclock)
 	case CEC_EVENT_PIN_HPD_HIGH:
 		printf("Event: HPD Pin %s\n",
 		       ev.event == CEC_EVENT_PIN_HPD_HIGH ? "High" : "Low");
-		warn("Unexpected HPD pin event!\n");
+		break;
+	case CEC_EVENT_PIN_5V_LOW:
+	case CEC_EVENT_PIN_5V_HIGH:
+		printf("Event: 5V Pin %s\n",
+		       ev.event == CEC_EVENT_PIN_5V_HIGH ? "High" : "Low");
 		break;
 	case CEC_EVENT_PIN_CEC_LOW:
 	case CEC_EVENT_PIN_CEC_HIGH:
 		printf("Event: CEC Pin %s\n",
 		       ev.event == CEC_EVENT_PIN_CEC_HIGH ? "High" : "Low");
-		warn("Unexpected CEC pin event!\n");
 		break;
 	default:
 		printf("Event: Unknown (0x%x)\n", ev.event);
@@ -1013,7 +1016,7 @@ static void poll_remote_devs(struct node *node, unsigned me)
 
 static void update_programmed_timers(struct node *node)
 {
-	std::set<struct Timer>::iterator it = programmed_timers.begin();
+	auto it = programmed_timers.begin();
 	/* Use the current minute because timers do not have second precision. */
 	time_t current_minute = time(nullptr) / 60;
 	time_t timer_start_minute = it->start_time / 60;

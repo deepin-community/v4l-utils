@@ -26,6 +26,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -85,6 +86,8 @@ constexpr val_def which_val_def[] = {
 	{ V4L2_CTRL_WHICH_CUR_VAL,	"V4L2_CTRL_WHICH_CUR_VAL" },
 	{ V4L2_CTRL_WHICH_DEF_VAL,	"V4L2_CTRL_WHICH_DEF_VAL" },
 	{ V4L2_CTRL_WHICH_REQUEST_VAL,	"V4L2_CTRL_WHICH_REQUEST_VAL" },
+	{ V4L2_CTRL_WHICH_MIN_VAL,	"V4L2_CTRL_WHICH_MIN_VAL" },
+	{ V4L2_CTRL_WHICH_MAX_VAL,	"V4L2_CTRL_WHICH_MAX_VAL" },
 	{ -1, "" }
 };
 
