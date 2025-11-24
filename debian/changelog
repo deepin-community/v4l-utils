@@ -1,3 +1,9 @@
+v4l-utils (1.30.1-1deepin2) unstable; urgency=medium
+
+  * libv4l2: zero v4l2_buffer
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Mon, 24 Nov 2025 15:47:09 +0800
+
 v4l-utils (1.30.1-1deepin1) unstable; urgency=medium
 
   * Revert 64-bit time_t transition changes.
