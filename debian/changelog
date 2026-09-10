@@ -1,3 +1,9 @@
+v4l-utils (1.30.1-1deepin3) unstable; urgency=medium
+
+  * Rebuild with LTO enabled (dpkg vendor feature optimize/lto).
+
+ -- tunaichao <tunaichao@uniontech.com>  Thu, 10 Sep 2026 21:07:19 +0800
+
 v4l-utils (1.30.1-1deepin2) unstable; urgency=medium
 
   * libv4l2: zero v4l2_buffer
